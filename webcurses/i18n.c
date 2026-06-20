@@ -434,18 +434,48 @@ static int frame_defeat(const char *s, char *out)
     return 0;
 }
 
-/* a handful of "<frame> %s" item/monster lines with the noun already filled. */
-struct frame_fix { const char *pre; const char *post; const char *fmt; int monster; };
+/* "<pre>NOUN<post>" lines. `dict` says how to translate the captured NOUN:
+ * D_NONE = already Korean (inv_name items) or a literal; D_MON/COLOR/IDENT =
+ * look it up (English in the engine) and fall back to the raw token. fmt tokens:
+ * {N을}=noun+을/를, {N가}=noun+이/가, {N0}=noun verbatim. */
+enum { D_NONE, D_MON, D_COLOR, D_IDENT, D_GEAR, D_BOLT };
+static const struct kv BOLT[] = {
+    { "bolt", "화살" }, { "flame", "화염" }, { "ice", "얼음" },
+};
+struct frame_fix { const char *pre; const char *post; const char *fmt; int dict; };
 static const struct frame_fix FIX[] = {
-    /* %N = noun (with object particle 을/를 unless fmt handles it) */
-    { "dropped ",        "", "{N을} 떨어뜨렸다", 0 },
-    { "you now have ",   "", "이제 {N을} 가지고 있다", 0 },
-    { "you found ",      "", "{N을} 발견했다", 0 },
-    { "moved onto ",     "", "{N0} 위로 이동했다", 0 },
-    { "wielding ",       "", "{N을} 들었다", 0 },
-    { "wearing ",        "", "{N을} 착용했다", 0 },
-    { "she stole ",      "!", "{N을} 훔쳐 갔다!", 0 },
-    { "started a wandering ", "", "{N가} 배회하기 시작했다", 1 },
+    /* items (noun already Korean via the inv_name wrapper) */
+    { "dropped ",        "",  "{N을} 떨어뜨렸다",        D_NONE },
+    { "you now have ",   "",  "이제 {N을} 가지고 있다",  D_NONE },
+    { "you found ",      "",  "{N을} 발견했다",          D_NONE },
+    { "moved onto ",     "",  "{N0} 위로 이동했다",      D_NONE },
+    { "wielding ",       "",  "{N을} 들었다",            D_NONE },
+    { "wearing ",        "",  "{N을} 착용했다",          D_NONE },
+    { "she stole ",      "!", "{N을} 훔쳐 갔다!",        D_NONE },
+    /* thrown weapon falls (English weapon name) */
+    { "the ",            " vanishes as it hits the ground", "{N가} 땅에 떨어지며 사라진다", D_GEAR },
+    /* wand bolts (bolt/flame/ice) */
+    { "you are hit by the ", "",          "{N0}에 맞았다",            D_BOLT },
+    { "the ",            " bounces",       "{N가} 튕긴다",        D_BOLT },
+    { "the ",            " whizzes by you","{N가} 옆을 스쳐 지나간다", D_BOLT },
+    /* monsters */
+    { "started a wandering ", "",                  "{N가} 배회하기 시작했다",  D_MON },
+    { "the ",            " appears confused",       "{N가} 혼란스러워한다",     D_MON },
+    /* magic flavor: captured token is a color word */
+    { "your hands begin to glow ",  "", "손이 {N0}빛으로 빛나기 시작한다",            D_COLOR },
+    { "your hands stop glowing ",   "", "손의 {N0}빛이 사그라든다",                   D_COLOR },
+    { "your armor glows ",  " for a moment", "갑옷이 잠시 {N0}빛으로 빛난다",          D_COLOR },
+    { "your armor is covered by a shimmering ", " shield", "갑옷이 어른거리는 {N0} 보호막에 둘러싸인다", D_COLOR },
+    { "the light in here suddenly seems ", "", "이곳의 빛이 갑자기 {N0} 보인다",       D_COLOR },
+    { "a ",              " light flashes in your eyes", "{N0} 빛이 눈앞에서 번쩍인다",  D_COLOR },
+    /* identify result: captured token is an item-identity name */
+    { "this scroll is an ", " scroll", "이 두루마리는 {N0} 두루마리다",  D_IDENT },
+    { "this scroll is a ",  " scroll", "이 두루마리는 {N0} 두루마리다",  D_IDENT },
+    /* input / command validation (captured token is a key char or short name) */
+    { "'",  "' is not a valid item", "'{N0}'{P는} 올바른 항목이 아니다", D_NONE },
+    { "'",  "' not in pack",         "'{N0}'{P는} 배낭에 없다",          D_NONE },
+    { "illegal command '", "'",      "잘못된 명령 '{N0}'",               D_NONE },
+    { "unknown character '", "'",    "알 수 없는 문자 '{N0}'",           D_NONE },
 };
 
 /* extract the noun between pre/post, substitute into fmt with josa */
@@ -470,9 +500,17 @@ static int frame_fix_apply(const char *s, char *out)
             int g = atoi(noun);
             char gb[32]; sprintf(gb, "금화 %d닢", g); strcpy(noun, gb);
         }
-        if (FIX[i].monster) {
+        if (FIX[i].dict == D_MON) {
             int at, len; const char *mko = find_monster(noun, &at, &len);
             if (mko) strcpy(noun, mko); else continue;
+        } else if (FIX[i].dict == D_COLOR) {
+            const char *c = DICT(COLOR, noun); if (c) strcpy(noun, c);
+        } else if (FIX[i].dict == D_IDENT) {
+            const char *c = DICT(IDENT, noun); if (c) strcpy(noun, c);
+        } else if (FIX[i].dict == D_GEAR) {
+            const char *c = DICT(GEAR, noun); if (c) strcpy(noun, c);
+        } else if (FIX[i].dict == D_BOLT) {
+            const char *c = DICT(BOLT, noun); if (c) strcpy(noun, c); else continue;
         }
         /* render fmt: {N을} -> noun+을/를, {N0} -> noun */
         out[0] = '\0';
@@ -480,6 +518,8 @@ static int frame_fix_apply(const char *s, char *out)
         while (*f) {
             if (starts(f, "{N을}")) { put_eul(out, noun); f += strlen("{N을}"); }
             else if (starts(f, "{N가}")) { put_iga(out, noun); f += strlen("{N가}"); }
+            else if (starts(f, "{N는}")) { strcat(out, noun); strcat(out, kr_eun_neun(noun)); f += strlen("{N는}"); }
+            else if (starts(f, "{P는}")) { strcat(out, kr_eun_neun(noun)); f += strlen("{P는}"); }
             else if (starts(f, "{N0}")) { strcat(out, noun); f += strlen("{N0}"); }
             else { size_t L = strlen(out); out[L] = *f++; out[L + 1] = '\0'; }
         }
@@ -669,9 +709,28 @@ static const struct tr_entry TABLE[] = {
     /* hunger (non-terse variants; terse strings differ but default is verbose) */
     { "you are starting to get hungry",             "슬슬 배가 고파지기 시작한다" },
     { "you are starting to feel weak",              "기운이 빠지기 시작한다" },
+
+    /* wizard / wear / misc completes still passing through */
+    { "you are already wearing some",               "이미 무언가를 착용하고 있다" },
+    { "not wizard any more",                        "더 이상 마법사가 아니다" },
+    { "blessing? (+,-,n)",                          "축복? (+,-,n)" },
+    { "wizard's Password:",                         "마법사 암호:" },
+    { "you have a strange feeling for a moment, then it passes",
+                                                    "잠시 기이한 기분이 들더니 사라진다" },
+    { "you have a normal feeling for a moment, then it passes",
+                                                    "잠시 평범한 기분이 들더니 사라진다" },
 };
 
 #define TABLE_LEN ((int)(sizeof(TABLE) / sizeof(TABLE[0])))
+
+/* ASCII case-insensitive string equality (bytes >=0x80 compared as-is). */
+static int ascii_ieq(const char *a, const char *b)
+{
+    for (; *a && *b; a++, b++)
+        if (tolower((unsigned char)*a) != tolower((unsigned char)*b))
+            return 0;
+    return *a == '\0' && *b == '\0';
+}
 
 /* normalized copy of `en` with a lower-case first character (ASCII only). */
 static const char *normalize_first(const char *en, char *buf, size_t cap)
@@ -689,11 +748,12 @@ const char *tr_msg(const char *en)
     if (en == NULL)
         return "";
 
-    /* 1) exact static table (normalize first char for endmsg's upper-casing) */
+    /* 1) exact static table, ASCII case-insensitive so neither endmsg()'s
+     *    upper-casing of msgbuf[0] nor any interior capitals matter. */
     char norm[256];
     const char *key = normalize_first(en, norm, sizeof norm);
     for (int i = 0; i < TABLE_LEN; i++)
-        if (strcmp(TABLE[i].en, key) == 0)
+        if (ascii_ieq(TABLE[i].en, en))
             return TABLE[i].ko;
 
     /* 2) dynamic frame rules — run on the first-char-normalized copy so that
@@ -703,6 +763,10 @@ const char *tr_msg(const char *en)
     if (frame_defeat(key, frame_buf)) return frame_buf;
     if (frame_prompt(key, frame_buf)) return frame_buf;
     if (frame_food(key, frame_buf)) return frame_buf;
+    if (starts(key, "welcome to level ")) {           /* exp level-up (numeric) */
+        sprintf(frame_buf, "레벨 %s에 도달했다", key + 17);
+        return frame_buf;
+    }
     if (frame_fix_apply(key, frame_buf)) return frame_buf;
 
     /* 3) untranslated: pass English (possibly with an embedded Korean noun) */
@@ -782,6 +846,17 @@ int main(void)
                                               "어느 것을 떨어뜨릴까? (* = 목록): " },
         { "Yuk, this food tastes awful",      "윽, 맛없는 음식이다" },
         { "My, that was a yummy slime-mold",  "와, slime-mold가 맛있었다" },
+        { "welcome to level 5",               "레벨 5에 도달했다" },
+        { "The hobgoblin appears confused",   "홉고블린이 혼란스러워한다" },
+        { "your hands begin to glow red",     "손이 빨간빛으로 빛나기 시작한다" },
+        { "this scroll is an identify potion scroll", "이 두루마리는 물약 감정 두루마리다" },
+        { "you are hit by the flame",         "화염에 맞았다" },
+        { "the ice bounces",                  "얼음이 튕긴다" },
+        { "the dagger vanishes as it hits the ground", "단검이 땅에 떨어지며 사라진다" },
+        { "you have a strange feeling for a moment, then it passes",
+                                              "잠시 기이한 기분이 들더니 사라진다" },
+        { "'a' is not a valid item",          "'a'는 올바른 항목이 아니다" },
+        { "illegal command 'Z'",              "잘못된 명령 'Z'" },
     };
     printf("\n--- tr_msg frames ---\n");
     for (int i = 0; i < (int)(sizeof(frames)/sizeof(frames[0])); i++) {
