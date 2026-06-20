@@ -1,0 +1,89 @@
+name: Build & Deploy (GitHub Pages)
+
+# Builds Rogue 5.4.4 -> WASM against the web curses bridge (build.sh), verifies
+# the i18n hook headlessly, and publishes the static web/ build to GitHub Pages.
+#
+# The engine source (Davidslv/rogue) and the emcc artifacts (web/rogue.js,
+# web/rogue.wasm) are gitignored — see HANDOFF.md §2/§6 — so CI clones the engine
+# and runs build.sh fresh, exactly like a local build.
+#
+#   build job   : runs on every push/PR/dispatch — clone engine, build, test.
+#   deploy job  : only on push to main (or manual dispatch) — publishes to Pages.
+
+on:
+  push:
+    branches: ["main", "claude/**"]
+  pull_request:
+    branches: ["main"]
+  workflow_dispatch:
+
+# Least privilege; the deploy job needs Pages + OIDC to publish.
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# Never run two Pages deploys at once; cancel superseded in-progress deploys.
+concurrency:
+  group: "pages"
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout port repo
+        uses: actions/checkout@v4
+
+      # Engine is not vendored (gitignored /rogue/). Clone it next to the bridge
+      # so build.sh's SRC=rogue resolves. Pin a tag for reproducible builds.
+      - name: Clone Rogue 5.4.4 engine source
+        run: git clone --depth 1 https://github.com/Davidslv/rogue.git rogue
+
+      # Match the toolchain HANDOFF.md verified against (emscripten 6.0.0).
+      - name: Set up Emscripten
+        uses: mymindstorm/setup-emsdk@v14
+        with:
+          version: 6.0.0
+          actions-cache-folder: "emsdk-cache"
+
+      - name: Build (rogue.js + rogue.wasm)
+        run: bash build.sh
+
+      # Verifiable end-to-end check: load the freshly built wasm in Node with a
+      # stub bridge and assert the i18n hook emits Korean. Mirrors HANDOFF.md §6.
+      - name: Verify i18n hook (headless)
+        run: node web/headless-test.js
+
+      - name: Verify save persistence flow (headless)
+        run: node web/persist-test.js
+
+      # Assemble the publishable site: runtime files only (drop the Node dev
+      # tests, *.o, and the gitignored engine tree). .nojekyll keeps Pages from
+      # munging emscripten output.
+      - name: Assemble site
+        run: |
+          mkdir -p _site
+          cp web/index.html web/terminal.html \
+             web/bridge.js web/audio.js web/persist.js \
+             web/rogue.js web/rogue.wasm _site/
+          touch _site/.nojekyll
+
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: _site
+
+  deploy:
+    # Only publish from the default branch (or a manual run); PR/feature builds
+    # stop after the build job above as a CI gate.
+    if: github.ref == 'refs/heads/main' || github.event_name == 'workflow_dispatch'
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
