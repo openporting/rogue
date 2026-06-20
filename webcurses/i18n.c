@@ -340,6 +340,7 @@ static const struct { const char *en, *ko; } TRANSLATIONS[] = {
     { "%s appears confused", "@1{이} 혼란에 빠진 듯하다." },
     { "you are hit by the %s", "$1에 맞았다." },
     { "she stole %s!",    "$1{을} 훔쳐 갔다!" },
+    { "I see no monster there", "보이는 몬스터가 없다." },
 
     /* pickup / pack (assembled in pack.c, command.c) */
     { "you found %d gold pieces", "금화 $1닢을 발견했다." },
@@ -354,6 +355,17 @@ static const struct { const char *en, *ko; } TRANSLATIONS[] = {
     { "you found a mysterious trap",  "정체불명의 함정을 발견했다." },
     { "you found a secret door",      "비밀 문을 발견했다." },
     { "you found %s",     "$1{을} 발견했다." },
+    /* '^' identify-trap command ("You have found <trap>") */
+    { "you have found a trapdoor",          "함정문을 발견했다." },
+    { "you have found an arrow trap",       "화살 함정을 발견했다." },
+    { "you have found a sleeping gas trap", "수면 가스 함정을 발견했다." },
+    { "you have found a beartrap",          "곰덫을 발견했다." },
+    { "you have found a teleport trap",     "순간이동 함정을 발견했다." },
+    { "you have found a poison dart trap",  "독 다트 함정을 발견했다." },
+    { "you have found a rust trap",         "녹 함정을 발견했다." },
+    { "you have found a mysterious trap",   "정체불명의 함정을 발견했다." },
+    { "you have found no trap there",       "여기엔 함정이 없다." },
+    { "there is nothing here to pick up",   "여기엔 주울 것이 아무것도 없다." },
     { "dropped %s",       "$1{을} 내려놓았다." },
     { "moved onto %s",    "$1 위로 이동했다." },
 
@@ -393,7 +405,10 @@ static const struct { const char *en, *ko; } TRANSLATIONS[] = {
     { "you faint from exhaustion",    "탈진하여 쓰러진다." },
     { "you fall asleep",              "잠에 빠져든다." },
     { "you can move again",           "다시 움직일 수 있다." },
+    { "you are frozen by the %s",     "@1{이} 당신을 얼려버렸다." },
     { "you are frozen",               "당신은 얼어붙었다." },
+    { "the monsters around you freeze", "주위의 몬스터들이 얼어붙는다." },
+    { "the monster freezes",          "몬스터가 얼어붙는다." },
     { "you are being held",           "당신은 붙잡혀 있다." },
     { "you have a tingling feeling",  "찌릿한 느낌이 든다." },
     { "you have a %s feeling for a moment, then it passes", "잠시 $1 느낌이 들다가 사라진다." },
@@ -410,6 +425,7 @@ static const struct { const char *en, *ko; } TRANSLATIONS[] = {
     /* potions / scrolls / wands effects */
     { "this scroll is an %s scroll",  "이 두루마리는 $1 두루마리다." },
     { "the light in here suddenly seems %s", "이곳의 빛이 갑자기 $1 듯하다." },
+    { "the room is lit by a shimmering %s light", "일렁이는 $1 빛이 방을 밝힌다." },
     { "the room is lit",              "방이 밝혀졌다." },
     { "the corridor glows and then fades", "복도가 빛났다가 사라진다." },
     { "the scroll turns to dust as you pick it up", "두루마리가 집어 들자 먼지로 변한다." },
@@ -424,10 +440,14 @@ static const struct { const char *en, *ko; } TRANSLATIONS[] = {
     { "your armor appears to be weaker now. Oh my!", "갑옷이 약해진 듯하다. 이런!" },
     { "your armor weakens",           "갑옷이 약해진다." },
     { "the rust vanishes instantly",  "녹이 순식간에 사라진다." },
+    { "the flame bounces off the dragon", "불꽃이 용에게 튕겨 나간다." },
     { "the flame bounces",            "불꽃이 튕겨 나간다." },
     { "the missle vanishes with a puff of smoke", "발사체가 연기를 내며 사라진다." },
     { "missle vanishes",              "발사체가 사라진다." },
     { "time now seems to be going slower", "시간이 더 느리게 흐르는 듯하다." },
+    { "you are suddenly in a parallel dimension", "당신은 갑자기 평행 우주에 와 있다." },
+    { "you are suddenly as smart as Ken Arnold in dungeon #%d", "당신은 갑자기 던전 #$1의 켄 아놀드만큼 똑똑해졌다." },
+    { "%s sparks dance across your armor", "$1 불꽃이 갑옷 위로 춤춘다." },
     { "you pack turns %s!",           "가방이 $1 색으로 변한다!" },
     { "what a puzzling scroll!",      "참 알쏭달쏭한 두루마리다!" },
     { "what a bizarre schtick!",      "참 별난 재주로군!" },
@@ -438,6 +458,7 @@ static const struct { const char *en, *ko; } TRANSLATIONS[] = {
     { "%s, that tasted good",         "$1, 맛이 좋았다." },
     { "%s, this food tastes awful",   "$1, 음식 맛이 형편없다." },
     { "hey, this tastes great.  It make you feel warm all over", "이야, 맛이 끝내준다. 온몸이 따뜻해진다." },
+    { "my, that was a yummy %s",      "이야, 맛있는 $1{을} 먹었다." },
     { "ugh, you would get ill if you ate that", "윽, 그걸 먹으면 탈이 날 것이다." },
     { "that's Inedible!",             "먹을 수 없다!" },
     { "that's undrinkable",           "마실 수 없다." },
@@ -502,6 +523,50 @@ static const struct { const char *en, *ko; } TRANSLATIONS[] = {
     { "File exists.  Do you wish to overwrite it?", "파일이 이미 있습니다. 덮어쓰시겠습니까?" },
     { "save file (%s)? ",             "세이브 파일 ($1)? " },
     { "file name: %s",                "파일 이름: $1" },
+
+    /* equip — wear / wield / rings / take off (assembled in armor.c, weapons.c,
+     * rings.c). Ring "you are now wearing %s (%c)" must precede the armor
+     * "you are now wearing %s" (armor form has no "(c)" suffix). */
+    { "you are now wearing %s (%c)",  "이제 $1{을} 끼었다. ($2)" },           /* ring */
+    { "you are now wearing %s",       "이제 $1{을} 입고 있다." },              /* armor */
+    { "you are now wielding %s (%c)", "이제 $1{을} 들고 있다. ($2)" },         /* weapon */
+    { "you are already wearing some.  You'll have to take it off first", "이미 입고 있다. 먼저 벗어야 한다." },
+    { "was wearing %s(%c)",           "$1{을} 빼고 있었다. ($2)" },            /* ring removed */
+    { "you used to be wearing %c) %s","$2{을} 벗었다. ($1)" },                 /* armor removed */
+    { "was wearing %c) %s",           "$2{을} 벗었다. ($1)" },                 /* armor removed (terse) */
+    { "wielding %s (%c)",             "$1 장착 중 ($2)" },
+    { "wearing %s",                   "$1 착용 중" },
+    { "not wearing such a ring",      "그런 반지를 끼고 있지 않다." },
+    { "wearing two",                  "양손 모두 착용 중" },
+
+    /* stairs */
+    { "I see no way down", "아래로 내려가는 길이 보이지 않는다." },
+    { "I see no way up",   "위로 올라가는 길이 보이지 않는다." },
+
+    /* hunger states (daemons.c; choose_str = terse / verbose, both mapped) */
+    { "you are getting the munchies",      "배가 고파지기 시작한다." },
+    { "you are starting to get hungry",    "배가 고파지기 시작한다." },
+    { "getting the munchies",              "배가 고파진다." },
+    { "getting hungry",                    "배가 고파진다." },
+    { "the munchies are interfering with your motor capabilites", "허기로 몸이 약해지기 시작한다." },
+    { "you are starting to feel weak",     "허기로 몸이 약해지기 시작한다." },
+    { "the munchies overpower your motor capabilities.  You freak out", "허기로 몸을 못 가눌 지경이다. 정신이 아득해진다." },
+    { "you feel too weak from lack of food.  You faint", "식량 부족으로 너무 쇠약하다. 기절한다." },
+    { "You freak out", "정신이 아득해진다." },
+    { "You faint",     "기절한다." },
+
+    /* status effects wearing off / levitation (daemons.c) */
+    { "far out!  Everything is all cosmic again", "어둠의 장막이 걷힌다." },
+    { "the veil of darkness lifts",               "어둠의 장막이 걷힌다." },
+    { "bummer!  You've hit the ground",           "땅에 사뿐히 내려선다." },
+    { "you float gently to the ground",           "땅에 사뿐히 내려선다." },
+    { "you feel in touch with the Universal Onenes", "우주적 일체감이 느껴진다." },
+    { "you feel as if somebody is watching over you", "누군가 당신을 지켜보는 듯한 느낌이 든다." },
+
+    /* medusa gaze (monsters.c) */
+    { "%s's gaze has confused you", "@1{이} 노려보아 당신은 혼란에 빠졌다." },
+    { "its gaze has confused you",  "그것이 노려보아 당신은 혼란에 빠졌다." },
+    { "started a wandering %s",     "@1{이} 배회하기 시작했다." },
 
     /* level / misc */
     { "welcome to level %d",          "$1층에 온 것을 환영한다." },
@@ -568,6 +633,17 @@ int main(void)
     check("You have defeated the snake", "뱀을 쓰러뜨렸다."); /* 뱀 has 받침 -> 을 */
     /* multiword monster name */
     check("You hit the ice monster", "\xEC\x96\xBC\xEC\x9D\x8C \xEA\xB4\xB4\xEB\xAC\xBC\xEC\x9D\x84 \xEB\xA7\x9E\xED\x98\x94\xEB\x8B\xA4."); /* 얼음 괴물을 맞혔다. */
+
+    /* equip: ring form (has "(c)") must not be shadowed by armor form */
+    /* English item name -> 조사 falls back to the no-받침 form (를); item-name
+     * translation is a separate task. */
+    check("You are now wearing the sapphire ring (a)", "이제 the sapphire ring를 끼었다. (a)");
+    check("You are now wearing leather armor", "이제 leather armor를 입고 있다.");
+    /* medusa gaze: %s'?s with KO monster name + 조사 */
+    check("The medusa's gaze has confused you", "메두사가 노려보아 당신은 혼란에 빠졌다.");
+    /* hunger */
+    check("you are starting to get hungry", "배가 고파지기 시작한다.");
+    check("I see no way down", "아래로 내려가는 길이 보이지 않는다.");
 
     /* untranslated falls back to English */
     check("xyzzy unmapped", "xyzzy unmapped");
