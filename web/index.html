@@ -1,0 +1,84 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
+<title>운명의 던전 — Rogue (web)</title>
+<style>
+  :root { --void:#0d0b0a; --floor:#1a1614; --edge:#2e2722; --ember:#e8a04a; --parch:#d9c7a3; }
+  html,body { margin:0; height:100%; background:var(--void); color:var(--parch);
+    font-family:'JetBrains Mono','SF Mono',ui-monospace,Menlo,Consolas,monospace; }
+  #wrap { min-height:100%; display:flex; flex-direction:column; align-items:center; padding:10px; box-sizing:border-box; }
+  #screen { line-height:1.05; white-space:pre; font-size:clamp(8px,2.4vw,15px);
+    background:#000; border:1px solid var(--edge); border-radius:6px; padding:8px; }
+  #screen b { color:var(--ember); }            /* standout cells */
+  #screen i { color:#000; background:var(--parch); font-style:normal; } /* inverse */
+  #hint { margin-top:10px; font-size:12px; color:#8d8069; max-width:80ch; text-align:center; }
+  #keys { margin-top:8px; display:grid; grid-template-columns:repeat(3,52px); gap:5px; }
+  #keys button { font:inherit; font-size:18px; padding:10px 0; background:var(--floor);
+    color:var(--parch); border:1px solid var(--edge); border-radius:8px; }
+  #keys button:active { transform:scale(.93); }
+</style>
+</head>
+<body>
+<div id="wrap">
+  <div id="screen">로딩 중… (rogue.wasm)</div>
+  <div id="keys"></div>
+  <div id="hint">
+    이동 h/j/k/l · 대각선 y/u/b/n · 줍기 , · 인벤 i · 계단 &gt; · 검색 s · 쉬기 .<br/>
+    이것은 터미널 렌더러입니다. 모바일 터치 UI는 prototype/rogue-touch-prototype.jsx 를 결선하세요(web/bridge.js 하단 4단계 참고).
+  </div>
+</div>
+
+<!-- load order: bridge first (defines window.RogueBridge), then the engine -->
+<script src="bridge.js"></script>
+<script>
+(function () {
+  const ROWS = 25, COLS = 80;
+  const el = document.getElementById("screen");
+
+  function render() {
+    const scr = window.RogueBridge.getScreen();
+    let html = "";
+    for (let y = 0; y < ROWS; y++) {
+      for (let x = 0; x < COLS; x++) {
+        const cell = scr[y][x];
+        let ch = cell.ch || " ";
+        ch = ch.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+        if (cell.attr & 1) html += "<i>" + ch + "</i>";       // A_STANDOUT
+        else if (ch === "@") html += "<b>" + ch + "</b>";
+        else html += ch;
+      }
+      html += "\n";
+    }
+    el.innerHTML = html;
+  }
+  window.RogueBridge.subscribe(render);
+
+  // keyboard -> engine
+  window.addEventListener("keydown", (e) => {
+    if (e.metaKey || e.ctrlKey || e.altKey) return;
+    let code = null;
+    const arrows = { ArrowLeft: "h", ArrowRight: "l", ArrowUp: "k", ArrowDown: "j" };
+    if (arrows[e.key]) code = arrows[e.key];
+    else if (e.key === "Enter") code = 13;
+    else if (e.key === "Escape") code = 27;
+    else if (e.key === "Backspace") code = 8;
+    else if (e.key.length === 1) code = e.key;
+    if (code !== null) { e.preventDefault(); window.RogueBridge.pushKey(code); }
+  });
+
+  // minimal on-screen d-pad for touch (full touch UI is the React prototype)
+  const keys = document.getElementById("keys");
+  [["y","y"],["k","k"],["u","u"],["h","h"],[".","."],["l","l"],["b","b"],["j","j"],["n","n"]]
+    .forEach(([label, k]) => {
+      const b = document.createElement("button");
+      b.textContent = label;
+      b.addEventListener("click", () => window.RogueBridge.pushKey(k));
+      keys.appendChild(b);
+    });
+})();
+</script>
+<script src="rogue.js"></script>
+</body>
+</html>
