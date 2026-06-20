@@ -22,6 +22,11 @@
  * so it works whether or not endmsg() has upper-cased msgbuf[0]. */
 const char *tr_msg(const char *en);
 
+/* Translate inv_name()'s English output (item as shown in inventory / msgs) to
+ * Korean. things.c wraps inv_name around this. Unrecognized forms pass through.
+ * Returns a static buffer valid until the next kr_item() call. */
+char *kr_item(const char *en);
+
 /* 1 if the last Unicode syllable of `word` carries a 받침 (final consonant),
  * 0 otherwise (including non-Hangul tails). UTF-8 input. */
 int kr_has_batchim(const char *word);

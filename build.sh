@@ -20,20 +20,9 @@ ROGUE_C=$(ls $SRC/*.c | grep -vE '/mdport\.c$')
 
 CFLAGS="-I$BRIDGE -I$SRC -DHAVE_CONFIG_H -O2"
 
-# --- Patch #2: message hook (i18n) ------------------------------------------
-# rogue/ is cloned fresh (gitignored), so the endmsg() hook is applied here at
-# build time rather than committed. Idempotent: the guard skips a patched tree.
-# At the end of endmsg(), msgbuf holds the fully assembled English line; route
-# it through tr_msg() (EN->KO, webcurses/i18n.c) into web_emit_msg() instead of
-# drawing it on the curses top line. clrtoeol()/refresh() right after still run,
-# so row 0 is cleared. See webcurses/i18n.{c,h}.
-IO=$SRC/io.c
-if ! grep -q 'web_emit_msg(tr_msg' "$IO"; then
-  perl -0pi -e 's/#include "rogue\.h"/#include "rogue.h"\nextern const char *tr_msg(const char *);\nextern void web_emit_msg(const char *);/' "$IO"
-  perl -0pi -e 's/\Qmvaddstr(0, 0, msgbuf);\E/web_emit_msg(tr_msg(msgbuf));/' "$IO"
-  grep -q 'web_emit_msg(tr_msg' "$IO" || { echo "patch #2 FAILED to apply to $IO" >&2; exit 1; }
-  echo "patched $IO (endmsg -> web_emit_msg(tr_msg(...)))"
-fi
+# Apply the idempotent source patches (message hook + Korean item names) to the
+# freshly-cloned, gitignored engine tree. See webcurses/patches.sh.
+bash "$BRIDGE/patches.sh" "$SRC"
 
 # mdport.c keeps every md_* function we need, but its native md_readchar() must
 # NOT win over the bridge's. The -D renames ONLY mdport's definition; io.c (the
