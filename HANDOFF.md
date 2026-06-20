@@ -79,7 +79,10 @@ source /path/to/emsdk/emsdk_env.sh                          # emscripten 활성�
 # 2) 디렉터리 배치: rogue/ 와 rogue-kr-port/ 를 형제로 두거나 build.sh의 경로 수정
 # 3) 빌드
 bash rogue-kr-port/build.sh    # -> web/rogue.js + rogue.wasm
+# 4) 헤드리스 검증(브라우저 없이 Node로 i18n 훅 확인)
+node web/headless-test.js      # '>'/'<'/'Q' -> 한글 메시지 PASS
 ```
+검증 환경: **emscripten 6.0.0**으로 풀빌드 + Node 구동 확인됨(정적 메시지 한글 방출 PASS).
 주요 플래그: `-I webcurses`(우리 curses.h 우선), `-sASYNCIFY`(blocking getch→`emscripten_sleep`), `-sFORCE_FILESYSTEM`(세이브), `-sALLOW_MEMORY_GROWTH`.
 
 ## 7. 원본 패치 3개 (build.sh에도 명시)
