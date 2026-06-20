@@ -89,8 +89,10 @@ rogue-kr-port/
   `<pre>`)로 렌더. 엔진은 페이지마다 키 대기 → "계속 ␣" 버튼이 space 전송, 다음 stdscr
   `refresh()`가 오버레이 자동 해제. **핵심 수정**: `subwin()`이 부모 윈도를 진짜로 aliasing하도록
   바꿔(우리 윈도는 이미 풀사이즈) INV_OVER가 복사한 아이템 줄 + 프롬프트가 실제로 그려지는 윈도(tw)에
-  들어가게 함. 네이티브 데모(`gcc -DWEBCURSES_DEMO`)로 오버레이 emit + subwin alias 검증, `node`로
-  bridge 상태머신 검증.
+  들어가게 함. **emcc 6.0.0 풀빌드 + Node로 인게임 검증**: `i`(INV_OVER) → 시작 소지품이 한글로 정확히
+  렌더(`a) 음식`, `b) +1 사슬 미늘 갑옷 [방어 4] (착용 중)`, `c) +1,+1 철퇴 (장착 중)`, `d) +1,+0 단궁`,
+  `e) +0,+0 화살 27개`, `--계속하려면 스페이스--`); `?`+`*`(hw 경로) → 2단 한글 도움말 렌더. i18n 회귀
+  테스트(`node web/headless-test.js`)도 PASS. (네이티브 데모 `gcc -DWEBCURSES_DEMO`로도 subwin alias 확인.)
 - ❌ **아직 안 된 것**:
   1. **세이브/스코어 영속화**(IDBFS `FS.syncfs`) 미연결 — 현재 MEMFS라 새로고침 시 세이브 소실.
 
