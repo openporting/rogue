@@ -166,18 +166,100 @@ static int match(const char *pat, const char *in,
     return *q == '\0';
 }
 
-/* Expand a Korean template into `out` (size `cap`). */
+/* Monster names (extern.c monsters[]), English -> Korean. Used by @N actor
+ * normalization so combat reads as Korean (e.g. "the bat" -> "박쥐"). */
+static const struct { const char *en, *ko; } MONSTERS[] = {
+    { "aquator", "\xEC\x95\x84\xEC\xBF\xA0\xEC\x95\x84\xED\x86\xA0\xEB\xA5\xB4" },     /* 아쿠아토르 */
+    { "bat", "\xEB\xB0\x95\xEC\xA5\x90" },                                            /* 박쥐 */
+    { "centaur", "\xEC\xBC\x84\xED\x83\x80\xEC\x9A\xB0\xEB\xA1\x9C\xEC\x8A\xA4" },     /* 켄타우로스 */
+    { "dragon", "\xEC\x9A\xA9" },                                                     /* 용 */
+    { "emu", "\xEC\x97\x90\xEB\xAE\xA4" },                                            /* 에뮤 */
+    { "venus flytrap", "\xED\x8C\x8C\xEB\xA6\xAC\xEC\xA7\x80\xEC\x98\xA5" },           /* 파리지옥 */
+    { "griffin", "\xEA\xB7\xB8\xEB\xA6\xAC\xED\x95\x80" },                            /* 그리핀 */
+    { "hobgoblin", "\xED\x99\x89\xEA\xB3\xA0\xEB\xB8\x94\xEB\xA6\xB0" },               /* 홉고블린 */
+    { "ice monster", "\xEC\x96\xBC\xEC\x9D\x8C \xEA\xB4\xB4\xEB\xAC\xBC" },            /* 얼음 괴물 */
+    { "jabberwock", "\xEC\x9E\xAC\xEB\xB2\x84\xEC\x9B\x8C\xED\x81\xAC" },              /* 재버워크 */
+    { "kestrel", "\xED\x99\xA9\xEC\xA1\xB0\xEB\xA1\xB1\xEC\x9D\xB4" },                 /* 황조롱이 */
+    { "leprechaun", "\xEB\xA0\x88\xED\x94\x84\xEB\x9F\xAC\xEC\xBD\x98" },              /* 레프러콘 */
+    { "medusa", "\xEB\xA9\x94\xEB\x91\x90\xEC\x82\xAC" },                             /* 메두사 */
+    { "nymph", "\xEB\x8B\x98\xED\x94\x84" },                                          /* 님프 */
+    { "orc", "\xEC\x98\xA4\xED\x81\xAC" },                                            /* 오크 */
+    { "phantom", "\xED\x8C\xAC\xED\x85\x80" },                                        /* 팬텀 */
+    { "quagga", "\xEC\xBD\xB0\xEA\xB0\x80" },                                         /* 콰가 */
+    { "rattlesnake", "\xEB\xB0\xA9\xEC\x9A\xB8\xEB\xB1\x80" },                        /* 방울뱀 */
+    { "snake", "\xEB\xB1\x80" },                                                      /* 뱀 */
+    { "troll", "\xED\x8A\xB8\xEB\xA1\xA4" },                                          /* 트롤 */
+    { "black unicorn", "\xEA\xB2\x80\xEC\x9D\x80 \xEC\x9C\xA0\xEB\x8B\x88\xEC\xBD\x98" }, /* 검은 유니콘 */
+    { "vampire", "\xEB\xB1\x80\xED\x8C\x8C\xEC\x9D\xB4\xEC\x96\xB4" },                /* 뱀파이어 */
+    { "wraith", "\xEB\xA7\x9D\xEB\xA0\xB9" },                                         /* 망령 */
+    { "xeroc", "\xEC\xA0\x9C\xEB\xA1\x9D" },                                          /* 제록 */
+    { "yeti", "\xEC\x98\x88\xED\x8B\xB0" },                                           /* 예티 */
+    { "zombie", "\xEC\xA2\x80\xEB\xB9\x84" },                                         /* 좀비 */
+};
+
+static int ci_streq(const char *a, const char *b)
+{
+    while (*a && *b) {
+        if (!ci_eq(*a, *b)) return 0;
+        a++; b++;
+    }
+    return *a == '\0' && *b == '\0';
+}
+
+static int ci_starts(const char *s, const char *pre)
+{
+    while (*pre) {
+        if (!ci_eq(*s, *pre)) return 0;
+        s++; pre++;
+    }
+    return 1;
+}
+
+/* Normalize a combatant name captured from the English message into a Korean
+ * actor name: drop the leading article, map you/it/something, and translate
+ * monster names. Falls back to the (de-articled) original when unknown. */
+static void actor_name(const char *cap, char *buf, size_t n)
+{
+    const char *s = cap;
+    if      (ci_starts(s, "the ")) s += 4;
+    else if (ci_starts(s, "an "))  s += 3;
+    else if (ci_starts(s, "a "))   s += 2;
+
+    const char *ko = NULL;
+    if      (ci_streq(s, "you"))       ko = "\xEB\x8B\xB9\xEC\x8B\xA0";        /* 당신 */
+    else if (ci_streq(s, "it"))        ko = "\xEA\xB7\xB8\xEA\xB2\x83";        /* 그것 */
+    else if (ci_streq(s, "something")) ko = "\xEB\xAC\xB4\xEC\x96\xB8\xEA\xB0\x80"; /* 무언가 */
+    else {
+        size_t i;
+        for (i = 0; i < sizeof MONSTERS / sizeof MONSTERS[0]; i++)
+            if (ci_streq(s, MONSTERS[i].en)) { ko = MONSTERS[i].ko; break; }
+    }
+
+    const char *src = ko ? ko : s;
+    size_t k = 0;
+    while (src[k] && k < n - 1) { buf[k] = src[k]; k++; }
+    buf[k] = '\0';
+}
+
+/* Expand a Korean template into `out` (size `cap`). $N inserts capture N as-is;
+ * @N inserts capture N normalized as an actor name (see actor_name). Both honor
+ * a trailing 조사 written as {을}/{이}/... */
 static void expand(const char *tmpl, char caps[MAX_CAPS][CAP_LEN], int ncap,
                    char *out, size_t cap)
 {
     size_t o = 0;
     const char *t = tmpl;
     const char *last = "";                    /* most recently inserted capture */
+    char nbuf[CAP_LEN];
     while (*t && o + 1 < cap) {
-        if (*t == '$' && t[1] >= '1' && t[1] <= '9') {
+        if ((*t == '$' || *t == '@') && t[1] >= '1' && t[1] <= '9') {
+            int actor = (*t == '@');
             int idx = t[1] - '1';
             t += 2;
-            const char *val = (idx < ncap) ? caps[idx] : "";
+            const char *raw = (idx < ncap) ? caps[idx] : "";
+            const char *val;
+            if (actor) { actor_name(raw, nbuf, sizeof nbuf); val = nbuf; }
+            else       { val = raw; }
             last = val;
             for (; *val && o + 1 < cap; val++)
                 out[o++] = *val;
@@ -207,19 +289,55 @@ static void expand(const char *tmpl, char caps[MAX_CAPS][CAP_LEN], int ncap,
  * More specific patterns (more literals / more args) must precede the patterns
  * they could otherwise be shadowed by; the first full match wins. */
 static const struct { const char *en, *ko; } TRANSLATIONS[] = {
-    /* combat (assembled in fight.c) */
-    { "the %s hits %s",   "$1{이} $2{을} 맞혔다." },
-    { "the %s misses %s", "$1{이} $2{을} 빗맞혔다." },
-    { "you hit %s",       "$1{을} 맞혔다." },
-    { "you missed %s",    "$1{을} 빗맞혔다." },
+    /* combat — assembled in fight.c (hit/miss/thunk/bounce, verb tables
+     * h_names/m_names + prname/set_mname). Order matters: melee forms (which
+     * end in a known subject/object) must precede the generic missile
+     * "the %s ... %s" forms so the latter don't capture a verb phrase into %s.
+     * @N normalizes a combatant (drops "the", maps you/it, KO monster names). */
+
+    /* player attacks a monster (er == NULL: "You <verb> the bat") */
+    { "you scored an excellent hit on %s", "@1{을} 정확히 명중시켰다!" },
+    { "you swing and hit %s",  "@1{을} 휘둘러 맞혔다." },
+    { "you have injured %s",   "@1{을} 다치게 했다." },
+    { "you swing and miss %s", "@1{을} 휘둘렀지만 빗맞혔다." },
+    { "you barely miss %s",    "@1{을} 가까스로 빗맞혔다." },
+    { "you don't hit %s",      "@1{을} 맞히지 못했다." },
+    { "you missed %s",         "@1{을} 빗맞혔다." },   /* thrown miss (bounce) */
+    { "you hit %s",            "@1{을} 맞혔다." },     /* melee + thrown hit */
+    { "you miss %s",           "@1{을} 빗맞혔다." },
+
+    /* monster attacks the player (object == "you") */
+    { "%s scored an excellent hit on you", "@1{이} 당신을 정확히 명중시켰다!" },
+    { "%s swings and hits you",   "@1{이} 휘둘러 당신을 맞혔다." },
+    { "%s has injured you",       "@1{이} 당신을 다치게 했다." },
+    { "%s swings and misses you", "@1{이} 휘둘렀지만 당신을 빗맞혔다." },
+    { "%s barely misses you",     "@1{이} 당신을 가까스로 빗맞혔다." },
+    { "%s doesn't hit you",       "@1{이} 당신을 맞히지 못했다." },
+    { "%s misses you",            "@1{이} 당신을 빗맞혔다." },
+    { "%s hit you",               "@1{이} 당신을 맞혔다." },
+
+    /* terse forms (no object printed) */
+    { "you hit",    "\xEB\xA7\x9E\xED\x98\x94\xEB\x8B\xA4." },   /* 맞혔다. */
+    { "you miss",   "\xEB\xB9\x97\xEB\xA7\x9E\xED\x98\x94\xEB\x8B\xA4." }, /* 빗맞혔다. */
+    { "%s misses",  "@1{이} 빗맞혔다." },
+    { "%s hit",     "@1{이} 맞혔다." },
+
+    /* kill */
+    { "you have defeated %s", "@1{을} 쓰러뜨렸다." },
+    { "defeated %s",          "@1{을} 쓰러뜨렸다." },
+
+    /* missile / thrown weapon vs monster (thunk/bounce: $1 = weapon name) */
+    { "the %s hits %s",   "$1{이} @2{을} 맞혔다." },
+    { "the %s misses %s", "$1{이} @2{을} 빗맞혔다." },
+
+    /* bolts / other combat-adjacent (sticks.c, etc.) */
     { "the %s hits",      "$1{이} 명중한다." },
     { "the %s misses ",   "$1{이} 빗나간다." },
     { "the %s bounces",   "$1{이} 튕겨 나간다." },
     { "the %s vanishes as it hits the ground", "$1{이} 땅에 떨어지며 사라진다." },
-    { "the %s whizzes past %s", "$1{이} $2{을} 스쳐 지나간다." },
+    { "the %s whizzes past %s", "$1{이} @2{을} 스쳐 지나간다." },
     { "the %s whizzes by you",  "$1{이} 당신을 스쳐 지나간다." },
-    { "%s appears confused", "$1{이} 혼란에 빠진 듯하다." },
-    { "%s misses",        "$1{이} 빗나간다." },
+    { "%s appears confused", "@1{이} 혼란에 빠진 듯하다." },
     { "you are hit by the %s", "$1에 맞았다." },
     { "she stole %s!",    "$1{을} 훔쳐 갔다!" },
 
@@ -435,6 +553,21 @@ int main(void)
     check("welcome to level 3", "3\xEC\xB8\xB5\xEC\x97\x90 \xEC\x98\xA8 \xEA\xB2\x83\xEC\x9D\x84 \xED\x99\x98\xEC\x98\x81\xED\x95\x9C\xEB\x8B\xA4."); /* 3층에 온 것을 환영한다. */
     check("you found 50 gold pieces", "\xEA\xB8\x88\xED\x99\x94 50\xEB\x8B\xA2\xEC\x9D\x84 \xEB\xB0\x9C\xEA\xB2\xAC\xED\x96\x88\xEB\x8B\xA4."); /* 금화 50닢을 발견했다. */
     check("nothing here", "\xEC\x97\xAC\xEA\xB8\xB0\xEC\x97\x94 \xEC\x95\x84\xEB\xAC\xB4\xEA\xB2\x83\xEB\x8F\x84 \xEC\x97\x86\xEB\x8B\xA4."); /* 여기엔 아무것도 없다. */
+
+    /* combat: player hits/misses a monster, monster name -> Korean, 조사 by 받침 */
+    check("You hit the bat",   "\xEB\xB0\x95\xEC\xA5\x90\xEB\xA5\xBC \xEB\xA7\x9E\xED\x98\x94\xEB\x8B\xA4."); /* 박쥐를 맞혔다. */
+    check("You scored an excellent hit on the troll", "\xED\x8A\xB8\xEB\xA1\xA4\xEC\x9D\x84 \xEC\xA0\x95\xED\x99\x95\xED\x9E\x88 \xEB\xAA\x85\xEC\xA4\x91\xEC\x8B\x9C\xEC\xBC\xB0\xEB\x8B\xA4!"); /* 트롤을 정확히 명중시켰다! */
+    check("You miss the orc", "\xEC\x98\xA4\xED\x81\xAC\xEB\xA5\xBC \xEB\xB9\x97\xEB\xA7\x9E\xED\x98\x94\xEB\x8B\xA4."); /* 오크를 빗맞혔다. */
+    /* monster attacks player: subject -> Korean + 이/가, object "당신을" */
+    check("The bat hit you", "\xEB\xB0\x95\xEC\xA5\x90\xEA\xB0\x80 \xEB\x8B\xB9\xEC\x8B\xA0\xEC\x9D\x84 \xEB\xA7\x9E\xED\x98\x94\xEB\x8B\xA4."); /* 박쥐가 당신을 맞혔다. */
+    check("The troll swings and hits you", "\xED\x8A\xB8\xEB\xA1\xA4\xEC\x9D\xB4 \xED\x9C\x98\xEB\x91\x98\xEB\x9F\xAC \xEB\x8B\xB9\xEC\x8B\xA0\xEC\x9D\x84 \xEB\xA7\x9E\xED\x98\x94\xEB\x8B\xA4."); /* 트롤이 휘둘러 당신을 맞혔다. */
+    check("The bat misses you", "\xEB\xB0\x95\xEC\xA5\x90\xEA\xB0\x80 \xEB\x8B\xB9\xEC\x8B\xA0\xEC\x9D\x84 \xEB\xB9\x97\xEB\xA7\x9E\xED\x98\x94\xEB\x8B\xA4."); /* 박쥐가 당신을 빗맞혔다. */
+    /* invisible attacker -> "something"/"it" mapped */
+    check("Something hit you", "\xEB\xAC\xB4\xEC\x96\xB8\xEA\xB0\x80\xEA\xB0\x80 \xEB\x8B\xB9\xEC\x8B\xA0\xEC\x9D\x84 \xEB\xA7\x9E\xED\x98\x94\xEB\x8B\xA4."); /* 무언가가 당신을 맞혔다. */
+    /* kill */
+    check("You have defeated the snake", "뱀을 쓰러뜨렸다."); /* 뱀 has 받침 -> 을 */
+    /* multiword monster name */
+    check("You hit the ice monster", "\xEC\x96\xBC\xEC\x9D\x8C \xEA\xB4\xB4\xEB\xAC\xBC\xEC\x9D\x84 \xEB\xA7\x9E\xED\x98\x94\xEB\x8B\xA4."); /* 얼음 괴물을 맞혔다. */
 
     /* untranslated falls back to English */
     check("xyzzy unmapped", "xyzzy unmapped");
