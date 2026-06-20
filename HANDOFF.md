@@ -55,8 +55,10 @@ rogue-kr-port/
    │                              자동 이어하기) + onExit에서 FS.syncfs(false) 저장.
    ├─ headless-test.js         ← 브라우저 없이 Node로 i18n 훅 검증(한글 메시지 PASS).
    ├─ persist-test.js          ← persist.js IDBFS 흐름 헤드리스 검증(Emscripten FS 목, PASS).
-   └─ more-prompt-test.js      ← 장착/장비(get_item) 프롬프트의 --More-- 교착 회귀 테스트.
-                                  실 bridge.js + endmsg/get_item 재현(wasm 불필요, PASS).
+   ├─ more-prompt-test.js      ← 장착/장비(get_item) 프롬프트의 --More-- 교착 회귀 테스트.
+   │                              실 bridge.js + endmsg/get_item 재현(wasm 불필요, PASS).
+   └─ e2e-test.js              ← 실제 WASM 엔진을 실 bridge.js로 구동하는 E2E. 장착 프롬프트에
+                                  잘못된 키를 넣어도 멈추지 않고 응답함을 검증(빌드 후 실행).
 ```
 
 ## 5. 현재 상태 (정확히)

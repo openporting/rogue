@@ -64,6 +64,11 @@ jobs:
       - name: Verify item-prompt --More-- recovery (headless)
         run: node web/more-prompt-test.js
 
+      # End-to-end on the actual WASM build: drive the wield prompt with stray
+      # keys and assert the engine never freezes and stays responsive.
+      - name: Verify equip prompt end-to-end (WASM)
+        run: node web/e2e-test.js
+
       # Assemble the publishable site: runtime files only (drop the Node dev
       # tests, *.o, and the gitignored engine tree). .nojekyll keeps Pages from
       # munging emscripten output.

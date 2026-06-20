@@ -225,6 +225,7 @@
     cells.push(b);
   }
   const bootEl = document.getElementById("boot");
+  let lastPromptKind = null;   // rising-edge tracking for the prompt keypad pop
 
   function render() {
     const scr = B.getScreen();
@@ -287,6 +288,14 @@
 
     // ── overlay sheet (inventory / discoveries / help / options / detection) ──
     renderOverlay(B.getOverlay());
+
+    // ── prompt affordance: when the engine starts waiting for an item letter /
+    //    yes-no answer, pop the keypad so the player can reply (and so a stray
+    //    map tap doesn't get fed to the prompt). Rising-edge: only on the
+    //    transition into a prompt, so the player can still close the sheet. ──
+    const pk = B.getPrompt();
+    if ((pk === "item" || pk === "yesno") && pk !== lastPromptKind) openSheet();
+    lastPromptKind = pk;
   }
   B.subscribe(render);
 
@@ -344,11 +353,22 @@
 
   let lastDepth = 0;       // drives the BGM retune + descend cue
 
+  /* When the engine is blocked on an item/yes-no prompt, movement gestures must
+     NOT be injected — Rogue would read them as a bogus item letter ("''는 올바른
+     항목이 아니다"). Swallow the gesture and pop the answer keypad instead.
+     Direction prompts aren't flagged, so a one-tap move still answers those. */
+  function blockedByPrompt() {
+    const k = B.getPrompt();
+    if (k === "item" || k === "yesno") { openSheet(); return true; }
+    return false;
+  }
+
   /* ── tap a tile → step one square toward it (engine resolves walls). While an
      overlay/prompt is up (no @ on screen), a tap advances it (Space). ── */
   mapEl.addEventListener("click", (e) => {
     const cell = e.target.closest(".cell"); if (!cell) return;
     buzz();
+    if (blockedByPrompt()) return;
     const p = B.getPlayer();
     if (!p) { I.space(); return; }
     const dx = Math.sign(+cell.dataset.bx - p.x), dy = Math.sign(+cell.dataset.by - p.y);
@@ -363,6 +383,7 @@
     const t = e.changedTouches[0], dx = t.clientX - ts.x, dy = t.clientY - ts.y; ts = null;
     if (Math.max(Math.abs(dx), Math.abs(dy)) < 28) return;   // a tap; handled by click
     buzz();
+    if (blockedByPrompt()) return;
     if (Math.abs(dx) > Math.abs(dy)) I.move(Math.sign(dx), 0); else I.move(0, Math.sign(dy));
   });
 
@@ -374,7 +395,11 @@
       b.className = "press" + (dx === 0 && dy === 0 ? " center" : "");
       b.textContent = g;
       b.setAttribute("aria-label", dx === 0 && dy === 0 ? "기다리기" : "이동 " + g);
-      b.addEventListener("click", () => { buzz(); (dx === 0 && dy === 0) ? I.rest() : I.move(dx, dy); });
+      b.addEventListener("click", () => {
+        buzz();
+        if (blockedByPrompt()) return;
+        (dx === 0 && dy === 0) ? I.rest() : I.move(dx, dy);
+      });
       dpad.appendChild(b);
     });
 
