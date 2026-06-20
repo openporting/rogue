@@ -82,18 +82,23 @@ rogue-kr-port/
     **영어 상태줄을 버퍼에서 직접 파싱**(Level=던전 깊이, Gold, Hp, Str, Arm, Exp=캐릭터
     레벨, 허기). 상태줄은 의도대로 번역하지 않으므로 안정적. Node 단위검증 PASS.
   - 기존 80×25 원본 화면 그대로 보는 디버그용 터미널 뷰는 `web/terminal.html`로 분리.
+- ✅ **INV_OVER 오버레이 → JS 바텀시트 (§10-#4) — 완료**: 인벤토리(`i`)·발견목록(`*`)·도움말(`?`)·
+  설정·마법탐지 등 **stdscr이 아닌 모든 윈도**(`hw`, INV_OVER의 `tw`)를 `web_curses.c`의
+  `wrefresh(w!=stdscr)`가 텍스트 오버레이로 JS에 push. `bridge.js`의 `overlayBegin/Line/End`가
+  `RogueBridge.getOverlay()`를 만들고, `web/index.html`이 별도 바텀시트(`#ovl-scrim`, 모노스페이스
+  `<pre>`)로 렌더. 엔진은 페이지마다 키 대기 → "계속 ␣" 버튼이 space 전송, 다음 stdscr
+  `refresh()`가 오버레이 자동 해제. **핵심 수정**: `subwin()`이 부모 윈도를 진짜로 aliasing하도록
+  바꿔(우리 윈도는 이미 풀사이즈) INV_OVER가 복사한 아이템 줄 + 프롬프트가 실제로 그려지는 윈도(tw)에
+  들어가게 함. 네이티브 데모(`gcc -DWEBCURSES_DEMO`)로 오버레이 emit + subwin alias 검증, `node`로
+  bridge 상태머신 검증.
 - ❌ **아직 안 된 것**:
-  1. **INV_OVER 인벤/전체도움말 오버레이**가 별도 윈도(`hw`/`tw`/`sw`)로 그려져 JS UI에 안 뜸(§11,
-     §10-#4). 텍스트는 한글화돼 있으니, `wrefresh(w!=stdscr)`를 JS 바텀시트로 분기해 push하면
-     바로 한글로 표시됨. 현재는 `i`/`*`가 안 보이지만, 그로 인한 프롬프트는 한글 로그에 뜨고
-     글자 키패드로 응답 가능.
-  2. **세이브/스코어 영속화**(IDBFS `FS.syncfs`) 미연결 — 현재 MEMFS라 새로고침 시 세이브 소실.
+  1. **세이브/스코어 영속화**(IDBFS `FS.syncfs`) 미연결 — 현재 MEMFS라 새로고침 시 세이브 소실.
 
 ### 5.1 emcc 빌드에서 실제로 필요했던 것 (이번 핸드오프에서 해결)
 설계상 "첫 컴파일에서 확장" 전제대로, 다음을 추가/수정함:
 - **`webcurses/config.h` 신규**: 원본은 `./configure`로 `config.h`를 생성하지만 브라우저/musl에서 의미 있는 feature test가 불가. emscripten이 실제 지원하는 능력만 정의(`HAVE_TERMIOS_H`/`HAVE_PWD_H`/`HAVE_ERASECHAR` 등), 미지원은 정의하지 않음(`HAVE_TERM_H`/`HAVE_WORKING_FORK`/`HAVE_GETLOADAVG` 제외 → termcap·fork·loadav 코드 컴파일 아웃). `-I webcurses`라 `extern.h`의 `#include "config.h"`가 여기로 잡힘(원본 트리 무수정).
 - **`curses.h`/`web_curses.c` 심볼 보강**: 첫 컴파일이 요구한 것 전부 추가 — `<stdio.h>/<stdbool.h>/<stdarg.h>` 포함(FILE/bool/va_list), `A_CHARTEXT`, `unctrl`, `flushinp`, `halfdelay`, `isendwin`, `mvwprintw`, `wgetnstr`, `getmaxx/getmaxy`, `mvwinch`, `werase`, `wclrtoeol`, `mvwaddch`, `subwin`/`mvwin`, 터미널 모드 no-op(`raw/noecho/keypad/clearok/...`), `erasechar/killchar`, `KEY_*` 상수(가드 밖에서 쓰는 것만), `_getch`→`getch`, `_cury/_curx`→`cy/cx`, `CE`(NULL).
-- **`newwin`/`subwin` 분리 할당**: 기존 단일 static을 malloc 분리(INV_OVER가 `hw`+`tw`+`sw` 동시 사용·복사하므로 aliasing 방지). `delwin`은 free.
+- **`newwin`/`subwin`**: `newwin`은 풀사이즈 윈도를 malloc(INV_OVER가 `hw`→`tw` 복사 시 둘이 별개 버퍼여야 함). `subwin(tw)`은 **부모(tw)를 그대로 반환(alias)** — 서브윈도는 본디 부모 버퍼를 공유하므로, 복사된 아이템 줄 + 프롬프트가 refresh되는 윈도(tw)에 모임(§10-#4). `delwin`은 `tw`만 free(=`sw`는 alias라 별도 free 없음 → 안전).
 - **`build.sh` 수정 (중요)**:
   - `vers.c`/`wizard.c`를 **다시 포함**(원본 제외 목록은 잘못 — `encstr`/`statlist`/`whatis`/`create_obj`/`passwd` 등 링크에 필수).
   - `md_readchar` 비활성화 `-D`를 **`mdport.c` 단독 컴파일에만** 적용. 전역 적용하면 `io.c`의 *호출부*까지 바뀌어 브리지를 우회하고 심볼 중복됨.
@@ -145,14 +150,16 @@ node web/headless-test.js      # '>'/'<'/'Q' -> 한글 메시지 PASS
 3. ✅ **UI 결선**(§9) → `web/index.html`이 실엔진에 결선된 바닐라 JS 터치 UI(맵 뷰포트·
    한글 로그·버퍼 파싱 상태바·D패드/탭/스와이프/액션/바텀시트). 디버그 터미널 뷰는
    `web/terminal.html`. 남은 것: 브라우저/실기기에서 `rogue.js` 풀빌드와 결합한 플레이 검증.
-4. **INV_OVER 오버레이 → JS 바텀시트 분기**(§11) → 인벤토리/도움말 메뉴 표시. UI 쪽 바텀시트·
-   글자 키패드는 이미 준비됨(더보기). C 쪽 `wrefresh(w!=stdscr)`를 `RogueBridge`로 push만 하면 됨.
+4. ✅ **INV_OVER 오버레이 → JS 바텀시트 분기**(§5) → 인벤토리/발견목록/도움말/설정 표시 완료.
+   `wrefresh(w!=stdscr)` → `RogueBridge.overlay*` → `#ovl-scrim` 바텀시트. subwin alias 수정 포함.
 5. **음향(SFX + BGM)**(§12) → Web Audio로 효과음 세트 + 던전 BGM. 엔진 리빌드 없이 JS 계층에서.
 6. 기기 테스트·세이브 영속화(IDBFS `FS.syncfs`)·정적 호스팅 배포.
 
 ## 11. 알려진 리스크
 - Asyncify로 `getch` 블로킹을 푸는 구조라, 스택 사이즈(`-sASYNCIFY_STACK_SIZE`) 조정이 필요할 수 있음. `-sEMULATE_FUNCTION_POINTER_CASTS=1`과 함께 쓰고 있는데(데몬 디스패치 때문) 둘 다 켠 상태로 빌드/구동은 확인됨. 장기적으로는 데몬/퓨즈 함수 시그니처를 통일해 `EMULATE_FUNCTION_POINTER_CASTS`를 떼는 게 더 가벼움.
-- 인벤토리/도움말은 기본 `inv_type = INV_OVER`라 별도 윈도(`tw`/`sw`)에 그려짐. `newwin`/`subwin`을 분리 malloc해 크래시는 없지만, 이 윈도는 `stdscr`가 아니라 **JS UI로 push되지 않음** → 메뉴가 화면에 안 뜸. `wrefresh(w!=stdscr)` 경로를 JS 오버레이/바텀시트로 분기해야 함(§10.4).
+- ~~인벤토리/도움말이 `stdscr`가 아닌 윈도(`tw`/`sw`)라 JS UI에 안 뜸~~ → **해결(§5, §10-#4)**:
+  `wrefresh(w!=stdscr)`를 오버레이 바텀시트로 분기. `subwin`을 부모 alias로 바꿔 INV_OVER 복사가
+  실제 그려지는 윈도에 들어가게 함(`sw`는 `tw`의 서브윈도이므로 alias가 정상; `delwin`은 `tw`만 함 → 안전).
 - 메시지(패치 #2)가 아직 미적용이라 게임 메시지가 화면 0행에 영어로 그려짐 — i18n 단계에서 `web_emit_msg`로 전환.
 - 세이브/스코어 영속화(IDBFS)는 아직 미연결 — 현재 MEMFS라 새로고침 시 세이브 소실.
 

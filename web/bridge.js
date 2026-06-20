@@ -16,6 +16,8 @@
     Array.from({ length: COLS }, () => ({ ch: " ", attr: 0 }))
   );
   let messages = [];
+  let overlay = null;          // current overlay sheet (array of text lines) or null
+  let overlayBuf = null;       // accumulator between overlayBegin/overlayEnd
   const keyQueue = [];
   const listeners = new Set();
   const notify = () => listeners.forEach((cb) => cb());
@@ -26,7 +28,11 @@
       if (y >= 0 && y < ROWS && x >= 0 && x < COLS)
         screen[y][x] = { ch: String.fromCharCode(ch), attr };
     },
-    refresh() { notify(); },
+    refresh() {
+      // a stdscr commit means the game redrew the map -> any overlay is done.
+      if (overlay) overlay = null;
+      notify();
+    },
     clearScreen() {
       for (let y = 0; y < ROWS; y++)
         for (let x = 0; x < COLS; x++) screen[y][x] = { ch: " ", attr: 0 };
@@ -36,6 +42,14 @@
       messages = [korean, ...messages].slice(0, 50);
       notify();
     },
+
+    /* Overlay seam (inventory / help / options / detection). The C side
+     * (web_curses.c wrefresh of a non-stdscr window) streams one text line per
+     * non-blank row between begin/end, then blocks on a key — the UI shows the
+     * sheet and answers with space/letters. The next stdscr refresh() clears it. */
+    overlayBegin() { overlayBuf = []; },
+    overlayLine(s) { if (overlayBuf) overlayBuf.push(s); },
+    overlayEnd() { overlay = overlayBuf || []; overlayBuf = null; notify(); },
     popKey() {
       return keyQueue.length ? keyQueue.shift() : -1; // -1 => C side yields
     },
@@ -47,6 +61,12 @@
     subscribe(cb) { listeners.add(cb); return () => listeners.delete(cb); },
     getScreen() { return screen; },
     getMessages() { return messages; },
+    /* current overlay sheet lines, or null when none is up (UI reads this to
+     * decide whether to show the inventory/help bottom sheet). */
+    getOverlay() { return overlay; },
+    /* dismiss the overlay from the UI (e.g. the close button) without waiting
+     * for the engine's redraw; the engine itself is unblocked via a key press. */
+    closeOverlay() { if (overlay) { overlay = null; notify(); } },
 
     /* ---- derived reads the touch UI uses (no engine changes needed) ---- */
 
@@ -146,8 +166,12 @@
  *
  *   4. Load order in index.html:  bridge.js  ->  this UI  ->  rogue.js .
  *
- * Still pending (§10-#4 / §11): inventory & full item-list overlays render to a
- * side window (INV_OVER) that isn't pushed to stdscr, so 'i'/'*' don't display
- * yet — the prompts they raise still surface in the Korean log and are
- * answerable from the letter keypad.
+ * §10-#4 DONE: inventory / discoveries / help / options / detection windows
+ * (everything Rogue draws to a non-stdscr window: hw, and INV_OVER's tw) are now
+ * forwarded by web_curses.c wrefresh() as a text overlay — overlayBegin/Line/End
+ * here build RogueBridge.getOverlay(), which index.html renders as a bottom
+ * sheet. The engine blocks on a key after each page, so the sheet's "계속"
+ * button sends space; the next stdscr refresh() auto-clears the overlay.
+ * (Fix that made INV_OVER work: subwin() now truly aliases its parent window in
+ * web_curses.c, so the copied item lines + prompt land in the refreshed window.)
  * ------------------------------------------------------------------------- */

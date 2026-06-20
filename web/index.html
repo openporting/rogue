@@ -102,6 +102,19 @@
   .letters button.special{ color:var(--ember); border-color:var(--edge2); font-family:var(--kr); font-size:11px; }
   button:active{ filter:brightness(1.25); }
 
+  /* ── overlay sheet (inventory / help / lists) ── */
+  #ovl-scrim{ position:fixed; inset:0; background:#000b; display:none; align-items:flex-end;
+              justify-content:center; z-index:30; }
+  #ovl-scrim.open{ display:flex; }
+  #ovl-sheet{ width:100%; max-width:440px; background:var(--floor); border-top:1px solid var(--edge2);
+              border-radius:16px 16px 0 0; padding:18px 18px calc(22px + env(safe-area-inset-bottom));
+              animation:slideup .22s ease-out; max-height:80vh; display:flex; flex-direction:column; }
+  #ovl-body{ margin:0 0 14px; overflow:auto; font-family:var(--mono); font-size:13px; line-height:1.5;
+             color:var(--parch); white-space:pre; tab-size:8;
+             background:var(--void); border:1px solid var(--edge); border-radius:8px; padding:12px 14px; }
+  .ovl-go{ width:100%; padding:13px 0; background:var(--void); border:1px solid var(--edge2);
+           border-radius:10px; color:var(--ember); font-family:var(--kr); font-size:14px; font-weight:600; }
+
   @keyframes torch{ 0%,100%{ text-shadow:0 0 6px #e8a04acc,0 0 14px #e8a04a66; }
                     50%{ text-shadow:0 0 4px #e8a04aaa,0 0 10px #e8a04a44; } }
   @keyframes slideup{ from{ transform:translateY(100%); } to{ transform:translateY(0); } }
@@ -151,6 +164,18 @@
     <div class="cmd-grid" id="cmds"></div>
     <div class="sub-h">아이템 선택 / 응답 — 아래 글자로 프롬프트에 답하세요</div>
     <div class="letters" id="letters"></div>
+  </div>
+</div>
+
+<!-- overlay sheet: inventory / discoveries / help / options / detection.
+     Fed by RogueBridge.getOverlay() (web_curses.c forwards every non-stdscr
+     window). The engine blocks on a key, so "계속" sends space. -->
+<div id="ovl-scrim">
+  <div id="ovl-sheet" onclick="event.stopPropagation()">
+    <div class="grip"></div>
+    <div class="sheet-h" id="ovl-h">소지품</div>
+    <pre id="ovl-body"></pre>
+    <button id="ovl-go" class="ovl-go press">계속 ␣</button>
   </div>
 </div>
 
@@ -249,8 +274,39 @@
       '<div class="msg m' + i + '"><span class="tick">▸</span><span></span></div>'
     ).join("");
     log.querySelectorAll(".msg span:last-child").forEach((s, i) => { s.textContent = msgs[i]; });
+
+    // ── overlay sheet (inventory / discoveries / help / options / detection) ──
+    renderOverlay(B.getOverlay());
   }
   B.subscribe(render);
+
+  /* The overlay is whatever Rogue drew to a non-stdscr window. We show its text
+     verbatim; the engine is blocked on a key, so "계속" sends space. */
+  const ovlScrim = document.getElementById("ovl-scrim");
+  const ovlBody = document.getElementById("ovl-body");
+  const ovlHead = document.getElementById("ovl-h");
+  function overlayTitle(lines) {
+    const text = lines.join("\n");
+    if (/달리기|화면 다시 그리기|명령 반복/.test(text)) return "도움말";
+    if (/설정|True|False/.test(text)) return "설정";
+    if (/물약|두루마리|반지|지팡이|발견/.test(text) && /\)/.test(text) === false) return "발견 목록";
+    return "소지품";
+  }
+  function renderOverlay(lines) {
+    if (lines && lines.length) {
+      // drop trailing blank rows and the engine's own prompt line (we have 계속)
+      let body = lines.filter((l) => !/^\s*--.*--\s*$/.test(l));
+      while (body.length && body[body.length - 1].trim() === "") body.pop();
+      ovlHead.textContent = overlayTitle(body);
+      ovlBody.textContent = body.join("\n");
+      ovlScrim.classList.add("open");
+    } else {
+      ovlScrim.classList.remove("open");
+    }
+  }
+  const overlayContinue = () => { buzz(); I.space(); };
+  document.getElementById("ovl-go").addEventListener("click", overlayContinue);
+  ovlScrim.addEventListener("click", overlayContinue);
 
   const buzz = () => navigator.vibrate && navigator.vibrate(8);
 
@@ -313,9 +369,9 @@
   scrim.addEventListener("click", closeSheet);
 
   // Rogue command keys (command.c). These open engine prompts; answer the
-  // resulting "which item?" with the letter keypad below. Inventory ('i') and
-  // the full item list ('*') render to a side window pending §11/§10-#4, so
-  // their overlay won't show yet — the prompt + log still work.
+  // resulting "which item?" with the letter keypad below. Inventory ('i'), the
+  // full item list ('*'), help ('?') and options now render in the overlay sheet
+  // (§10-#4): web_curses.c forwards their window, the UI shows it, "계속" advances.
   const cmds = [
     ["q","마시기"],["r","읽기"],["e","먹기"],
     ["w","장착"],["W","입기"],["t","던지기"],

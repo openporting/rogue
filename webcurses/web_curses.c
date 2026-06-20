@@ -23,6 +23,11 @@
 #define JS_MSG(s)             EM_ASM({ RogueBridge.msg(UTF8ToString($0)); }, (s))
 #define JS_POPKEY()           EM_ASM_INT({ return RogueBridge.popKey(); })
 #define JS_SLEEP(ms)          emscripten_sleep(ms)
+/* overlay seam: inventory / help / options / detection windows (everything that
+ * is NOT stdscr) get pushed as a text overlay the JS UI shows as a sheet. */
+#define JS_OVL_BEGIN()        EM_ASM({ RogueBridge.overlayBegin(); })
+#define JS_OVL_LINE(s)        EM_ASM({ RogueBridge.overlayLine(UTF8ToString($0)); }, (s))
+#define JS_OVL_END()          EM_ASM({ RogueBridge.overlayEnd(); })
 #else
 /* native fallbacks so the file compiles & runs without emscripten */
 static int  JS_POPKEY(void) { int c = getchar(); return c == EOF ? 'Q' : c; }
@@ -31,6 +36,9 @@ static int  JS_POPKEY(void) { int c = getchar(); return c == EOF ? 'Q' : c; }
 #define JS_CLEAR()            ((void)0)
 #define JS_MSG(s)             fprintf(stderr, "[msg] %s\n", (s))
 #define JS_SLEEP(ms)          ((void)0)
+#define JS_OVL_BEGIN()        fprintf(stderr, "[ovl ----\n")
+#define JS_OVL_LINE(s)        fprintf(stderr, "[ovl] %s\n", (s))
+#define JS_OVL_END()          fprintf(stderr, "[ovl ----]\n")
 #endif
 
 int LINES = ROGUE_LINES, COLS = ROGUE_COLS;
@@ -60,10 +68,15 @@ int endwin(void) { JS_REFRESH(); return OK; }
 int isendwin(void) { return FALSE; }
 
 /* Rogue keeps a long-lived scratch window `hw`, and the INV_OVER menu briefly
- * opens a second window (tw) plus a subwindow (sw) at the same time and copies
- * hw -> sw. A single shared static would alias them, so allocate each window.
- * Size args are ignored; every window is a full ROGUE_LINES x ROGUE_COLS sheet
- * (writes stay in-bounds and nothing here pushes a sub-window to the JS UI). */
+ * opens a second window (tw) plus a subwindow (sw = subwin(tw)) and copies
+ * hw -> sw, then writes the prompt to tw and refreshes tw. `hw` and `tw` must be
+ * distinct buffers (the copy reads hw, writes tw), so newwin allocates a fresh
+ * sheet. But `sw` is a *subwindow of tw* — it must share tw's buffer so the
+ * copied item lines and the prompt end up in the one window that gets refreshed;
+ * since our windows are already full ROGUE_LINES x ROGUE_COLS sheets (origin args
+ * ignored), subwin just returns the parent. delwin only ever frees tw, never sw,
+ * so the shared pointer is safe. Size/origin args are ignored; writes stay
+ * in-bounds and wrefresh(w != stdscr) is forwarded to the JS overlay sheet. */
 WINDOW *newwin(int nl, int nc, int by, int bx) {
     (void)nl; (void)nc; (void)by; (void)bx;
     WINDOW *w = (WINDOW *)malloc(sizeof *w);
@@ -71,7 +84,8 @@ WINDOW *newwin(int nl, int nc, int by, int bx) {
     return w;
 }
 WINDOW *subwin(WINDOW *orig, int nl, int nc, int by, int bx) {
-    (void)orig; return newwin(nl, nc, by, bx);
+    (void)nl; (void)nc; (void)by; (void)bx;
+    return orig;   /* true subwindow: shares the parent's full-size buffer */
 }
 int delwin(WINDOW *w) {
     if (w && w != &_stdscr && w != &_curscr) free(w);
@@ -147,17 +161,50 @@ int clrtobot(void) {
 }
 int box(WINDOW *w, int v, int h) { (void)w; (void)v; (void)h; return OK; }
 
+/* Forward a non-stdscr window (inventory list, help, options, magic detection)
+ * to the JS overlay sheet: one trimmed text line per non-blank row. Cells hold
+ * raw bytes, so Korean (UTF-8, kr_item) lines come across whole; nul/control
+ * bytes (e.g. the help screen's tabs) collapse to spaces. */
+static void push_overlay(WINDOW *w) {
+    char line[ROGUE_COLS + 1];
+    int lastrow = -1;
+    for (int y = 0; y < w->maxy && y < ROGUE_LINES; y++)
+        for (int x = 0; x < w->maxx && x < ROGUE_COLS; x++) {
+            unsigned char c = (unsigned char)w->ch[y][x];
+            if (c != ' ' && c != 0) { lastrow = y; break; }
+        }
+    if (lastrow < 0) return;                 /* nothing to show */
+    JS_OVL_BEGIN();
+    for (int y = 0; y <= lastrow; y++) {
+        int last = -1;
+        for (int x = 0; x < w->maxx && x < ROGUE_COLS; x++) {
+            unsigned char c = (unsigned char)w->ch[y][x];
+            if (c == 0 || c < 0x20) c = ' ';  /* nul / tab / other controls */
+            line[x] = (char)c;
+            if (c != ' ') last = x;
+        }
+        line[last + 1] = '\0';               /* right-trim trailing blanks */
+        JS_OVL_LINE(line);
+    }
+    JS_OVL_END();
+}
+
 int wrefresh(WINDOW *w) {
-    /* push only changed cells of stdscr to the touch UI, then commit a frame */
     if (w == stdscr) {
+        /* push only changed cells of stdscr to the touch UI, then commit a
+         * frame. A stdscr refresh also dismisses any overlay (the game redrew). */
         for (int y = 0; y < ROGUE_LINES; y++)
             for (int x = 0; x < ROGUE_COLS; x++)
                 if (w->ch[y][x] != shadow[y][x]) {
                     shadow[y][x] = w->ch[y][x];
                     JS_CELL(y, x, (int)(unsigned char)w->ch[y][x], (int)w->at[y][x]);
                 }
+        JS_REFRESH();
+    } else if (w != curscr) {
+        push_overlay(w);          /* inventory / help / options / detection sheet */
+    } else {
+        JS_REFRESH();             /* curscr = full-redraw request */
     }
-    JS_REFRESH();
     return OK;
 }
 int refresh(void) { return wrefresh(stdscr); }
@@ -258,6 +305,22 @@ int main(void) {
     mvaddstr(0, 0, "there is a dagger here");
     refresh();
     web_emit_msg("\xEC\x97\xAC\xEA\xB8\xB0 \xEB\x8B\xA8\xEA\xB2\x80\xEC\x9D\xB4 \xEC\x9E\x88\xEB\x8B\xA4."); /* 여기 단검이 있다. */
+
+    /* overlay smoke test: emulate INV_OVER (newwin tw + subwin sw = tw), copy a
+     * "pack listing" from hw into sw, write the prompt to tw, refresh tw. */
+    {
+        WINDOW *hw_demo = newwin(LINES, COLS, 0, 0);
+        WINDOW *tw = newwin(LINES, COLS, 0, 0);
+        WINDOW *sw = subwin(tw, LINES, COLS, 0, 0);
+        wmove(hw_demo, 0, 0); waddstr(hw_demo, "a) +0 dagger");
+        wmove(hw_demo, 1, 0); waddstr(hw_demo, "b) some food");
+        for (int y = 0; y < 2; y++) { wmove(sw, y, 0); for (int x = 0; x < 12; x++) waddch(sw, mvwinch(hw_demo, y, x)); }
+        wmove(tw, 2, 1); waddstr(tw, "--Press space to continue--");
+        wrefresh(tw);   /* -> [ovl] lines on stderr; sw must alias tw */
+        delwin(tw);
+        delwin(hw_demo);
+    }
+
     printf("\n[demo] @ at (5,3), key read = %c\n", (char)getch());
     endwin();
     return 0;
