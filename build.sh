@@ -12,25 +12,38 @@ SRC=rogue
 BRIDGE=webcurses
 OUT=web
 
-# Rogue .c files, EXCLUDING mdport.c's readchar (we override md_readchar) and
-# anything that pulls real tty/curses. We keep mdport.c but neutralize its
-# md_readchar via -D below.
-ROGUE_C=$(ls $SRC/*.c | grep -vE '/(vers|wizard)\.c$')
+# All Rogue .c files EXCEPT mdport.c (compiled separately below). vers.c
+# (version strings + encstr/statlist used by the save crypto) and wizard.c
+# (whatis/create_obj/passwd, called from command.c) MUST be included or the
+# link fails with undefined references.
+ROGUE_C=$(ls $SRC/*.c | grep -vE '/mdport\.c$')
+
+CFLAGS="-I$BRIDGE -I$SRC -DHAVE_CONFIG_H -O2"
+
+# mdport.c keeps every md_* function we need, but its native md_readchar() must
+# NOT win over the bridge's. The -D renames ONLY mdport's definition; io.c (the
+# sole caller) keeps calling the real md_readchar -> web_curses.c. Scoping the
+# -D to this one file is essential: applying it globally would also rewrite
+# io.c's *call* and bypass the bridge, and double-define the renamed symbol.
+emcc -c $SRC/mdport.c $CFLAGS \
+  -Dmd_readchar=__rogue_native_readchar_unused \
+  -o $OUT/mdport.o
 
 emcc \
   $ROGUE_C \
+  $OUT/mdport.o \
   $BRIDGE/web_curses.c \
-  -I$BRIDGE -I$SRC \
-  -Dmd_readchar=__rogue_native_readchar_unused \
-  -DHAVE_CONFIG_H \
-  -O2 \
+  $CFLAGS \
   -sASYNCIFY \
   -sASYNCIFY_STACK_SIZE=24576 \
+  -sEMULATE_FUNCTION_POINTER_CASTS=1 \
   -sALLOW_MEMORY_GROWTH=1 \
   -sFORCE_FILESYSTEM=1 \
   -sEXPORTED_RUNTIME_METHODS=ccall,cwrap,UTF8ToString \
   -sEXIT_RUNTIME=0 \
   -o $OUT/rogue.js
+
+rm -f $OUT/mdport.o
 
 echo "built -> $OUT/rogue.js (+ rogue.wasm)"
 

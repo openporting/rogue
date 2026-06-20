@@ -1,0 +1,11 @@
+# Upstream Rogue 5.4.4 engine source — cloned by build.sh, not vendored here.
+# See HANDOFF.md §2/§6: git clone --depth 1 https://github.com/Davidslv/rogue.git rogue
+/rogue/
+
+# Emscripten build artifacts (regenerate with build.sh)
+/web/rogue.js
+/web/rogue.wasm
+/web/*.o
+
+# emsdk, if installed inside the tree
+/emsdk/

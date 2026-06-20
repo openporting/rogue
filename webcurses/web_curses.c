@@ -12,6 +12,7 @@
 #include "curses.h"
 #include <stdarg.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 #ifdef __EMSCRIPTEN__
@@ -56,16 +57,30 @@ WINDOW *initscr(void) {
     return stdscr;
 }
 int endwin(void) { JS_REFRESH(); return OK; }
+int isendwin(void) { return FALSE; }
 
+/* Rogue keeps a long-lived scratch window `hw`, and the INV_OVER menu briefly
+ * opens a second window (tw) plus a subwindow (sw) at the same time and copies
+ * hw -> sw. A single shared static would alias them, so allocate each window.
+ * Size args are ignored; every window is a full ROGUE_LINES x ROGUE_COLS sheet
+ * (writes stay in-bounds and nothing here pushes a sub-window to the JS UI). */
 WINDOW *newwin(int nl, int nc, int by, int bx) {
     (void)nl; (void)nc; (void)by; (void)bx;
-    /* Rogue uses one scratch window (hw); a single shared static is enough. */
-    static WINDOW scratch;
-    win_init(&scratch);
-    return &scratch;
+    WINDOW *w = (WINDOW *)malloc(sizeof *w);
+    if (w) win_init(w);
+    return w;
 }
-int delwin(WINDOW *w)  { (void)w; return OK; }
+WINDOW *subwin(WINDOW *orig, int nl, int nc, int by, int bx) {
+    (void)orig; return newwin(nl, nc, by, bx);
+}
+int delwin(WINDOW *w) {
+    if (w && w != &_stdscr && w != &_curscr) free(w);
+    return OK;
+}
+int mvwin(WINDOW *w, int y, int x) { (void)w; (void)y; (void)x; return OK; }
 int touchwin(WINDOW *w){ (void)w; return OK; }
+int getmaxx(WINDOW *w) { return w->maxx; }
+int getmaxy(WINDOW *w) { return w->maxy; }
 
 /* ---- cursor ---- */
 int wmove(WINDOW *w, int y, int x) {
@@ -100,6 +115,10 @@ int wprintw(WINDOW *w, const char *fmt, ...){ va_list a; va_start(a, fmt); int r
 int mvprintw(int y, int x, const char *fmt, ...) {
     if (move(y, x) != OK) return ERR;
     va_list a; va_start(a, fmt); int r = vw(stdscr, fmt, a); va_end(a); return r;
+}
+int mvwprintw(WINDOW *w, int y, int x, const char *fmt, ...) {
+    if (wmove(w, y, x) != OK) return ERR;
+    va_list a; va_start(a, fmt); int r = vw(w, fmt, a); va_end(a); return r;
 }
 
 /* ---- attributes ---- */
@@ -139,9 +158,50 @@ int wrefresh(WINDOW *w) {
 }
 int refresh(void) { return wrefresh(stdscr); }
 
+int mvwaddch(WINDOW *w, int y, int x, int ch) { return wmove(w, y, x) == OK ? waddch(w, ch) : ERR; }
+
+int werase(WINDOW *w) { return wclear(w); }
+int wclrtoeol(WINDOW *w) {
+    for (int x = w->cx; x < w->maxx; x++) w->ch[w->cy][x] = ' ';
+    return OK;
+}
+
 /* ---- query ---- */
 int winch(WINDOW *w) { return (unsigned char)w->ch[w->cy][w->cx]; }
 int mvinch(int y, int x) { return move(y, x) == OK ? winch(stdscr) : ERR; }
+int mvwinch(WINDOW *w, int y, int x) { return wmove(w, y, x) == OK ? winch(w) : ERR; }
+
+/* ---- terminal modes: browser has no tty, so these are no-ops ---- */
+int raw(void)      { return OK; }
+int noraw(void)    { return OK; }
+int cbreak(void)   { return OK; }
+int nocbreak(void) { return OK; }
+int echo(void)     { return OK; }
+int noecho(void)   { return OK; }
+int nl(void)       { return OK; }
+int nonl(void)     { return OK; }
+int clearok(WINDOW *w, int bf) { (void)w; (void)bf; return OK; }
+int leaveok(WINDOW *w, int bf) { (void)w; (void)bf; return OK; }
+int idlok(WINDOW *w, int bf)   { (void)w; (void)bf; return OK; }
+int keypad(WINDOW *w, int bf)  { (void)w; (void)bf; return OK; }
+int baudrate(void) { return 38400; }
+int mvcur(int oy, int ox, int ny, int nx) { (void)oy; (void)ox; return move(ny, nx); }
+int erasechar(void) { return '\b'; }      /* backspace */
+int killchar(void)  { return 0x15; }      /* ^U */
+int flushinp(void)  { return OK; }        /* input flush — no tty buffer here */
+int halfdelay(int t) { (void)t; return OK; }  /* timed input mode — unused */
+
+/* printable rendering of a key code, like ncurses unctrl(): control chars as
+ * ^X, DEL as ^?, high-bit chars as M-x, everything else as itself. */
+char *unctrl(int ch) {
+    static char buf[5];
+    unsigned char c = (unsigned char)ch;
+    if (c < 0x20)        { buf[0] = '^'; buf[1] = (char)(c + '@'); buf[2] = '\0'; }
+    else if (c == 0x7f)  { buf[0] = '^'; buf[1] = '?';             buf[2] = '\0'; }
+    else if (c < 0x80)   { buf[0] = (char)c;                       buf[1] = '\0'; }
+    else                 { buf[0] = 'M'; buf[1] = '-'; buf[2] = (char)(c & 0x7f); buf[3] = '\0'; }
+    return buf;
+}
 
 /* ============================================================
  *  INPUT seam — replaces md_readchar() in mdport.c.
@@ -155,6 +215,29 @@ int md_readchar(void) {
 }
 int getch(void)            { return md_readchar(); }
 int wgetch(WINDOW *w)      { (void)w; return md_readchar(); }
+
+/* line input: read keys until Enter, echoing into the window, honoring
+ * backspace, capped at n-1 chars. Used by rip.c's "press return" / name entry. */
+int wgetnstr(WINDOW *w, char *str, int n) {
+    int i = 0, c;
+    while ((c = md_readchar()) != '\n' && c != '\r') {
+        if (c == '\b' || c == 0x7f) {            /* backspace / DEL */
+            if (i > 0) {
+                i--;
+                if (w->cx > 0) { w->cx--; w->ch[w->cy][w->cx] = ' '; }
+                refresh();
+            }
+            continue;
+        }
+        if (i < n - 1) {
+            str[i++] = (char)c;
+            waddch(w, c);
+            refresh();
+        }
+    }
+    str[i] = '\0';
+    return OK;
+}
 
 /* ============================================================
  *  MESSAGE seam — call this from the END of endmsg() in io.c, passing the

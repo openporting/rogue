@@ -45,7 +45,22 @@ rogue-kr-port/
 - ✅ **UI 프로토타입**: 동작 확정. 입력 방식(탭+스와이프+D-패드 전부) / 레이아웃 사용자 승인 완료("지금처럼").
 - ✅ **브리지 C**: `gcc -DWEBCURSES_DEMO -Wall` 컴파일·실행 검증(스모크 테스트: `@` 배치 + 한글 메시지 emit + 키 echo).
 - ✅ **JS 브리지 / 빌드 스크립트 / 패치 명세**: 작성 완료.
-- ❌ **아직 안 된 것**: 실제 `emcc` 풀빌드와 플레이테스트. (작업 샌드박스에 emsdk 부재) → **이게 다음 핸드오프의 첫 작업.**
+- ✅ **emcc 풀빌드 완료**: `build.sh`로 `web/rogue.js`(+`rogue.wasm`) 생성. 33개 원본 `.c` 전부 컴파일 + 링크 성공.
+- ✅ **런타임 검증(Node)**: 엔진이 던전을 렌더(드로콜 2000+), `@`/몬스터/아이템/상태줄 표시, 키 입력→이동/공격/계단/종료 동작 확인. 브라우저용 최소 터미널 렌더러 `web/index.html` 추가.
+- ❌ **아직 안 된 것**:
+  1. **메시지 훅(패치 #2) 미적용** → 메시지가 아직 curses 상단 라인에 그려짐. i18n(`tr_msg`/`web_emit_msg`) 미연결.
+  2. **모바일 터치 UI 결선**(프로토타입 → 실엔진, §9). 현재 `index.html`은 키보드/간이 D-패드만.
+  3. **INV_OVER 인벤/도움말 오버레이**가 별도 윈도(`tw`/`sw`)로 그려져 JS UI에 안 뜸(§11, 바텀시트로 분기 필요).
+
+### 5.1 emcc 빌드에서 실제로 필요했던 것 (이번 핸드오프에서 해결)
+설계상 "첫 컴파일에서 확장" 전제대로, 다음을 추가/수정함:
+- **`webcurses/config.h` 신규**: 원본은 `./configure`로 `config.h`를 생성하지만 브라우저/musl에서 의미 있는 feature test가 불가. emscripten이 실제 지원하는 능력만 정의(`HAVE_TERMIOS_H`/`HAVE_PWD_H`/`HAVE_ERASECHAR` 등), 미지원은 정의하지 않음(`HAVE_TERM_H`/`HAVE_WORKING_FORK`/`HAVE_GETLOADAVG` 제외 → termcap·fork·loadav 코드 컴파일 아웃). `-I webcurses`라 `extern.h`의 `#include "config.h"`가 여기로 잡힘(원본 트리 무수정).
+- **`curses.h`/`web_curses.c` 심볼 보강**: 첫 컴파일이 요구한 것 전부 추가 — `<stdio.h>/<stdbool.h>/<stdarg.h>` 포함(FILE/bool/va_list), `A_CHARTEXT`, `unctrl`, `flushinp`, `halfdelay`, `isendwin`, `mvwprintw`, `wgetnstr`, `getmaxx/getmaxy`, `mvwinch`, `werase`, `wclrtoeol`, `mvwaddch`, `subwin`/`mvwin`, 터미널 모드 no-op(`raw/noecho/keypad/clearok/...`), `erasechar/killchar`, `KEY_*` 상수(가드 밖에서 쓰는 것만), `_getch`→`getch`, `_cury/_curx`→`cy/cx`, `CE`(NULL).
+- **`newwin`/`subwin` 분리 할당**: 기존 단일 static을 malloc 분리(INV_OVER가 `hw`+`tw`+`sw` 동시 사용·복사하므로 aliasing 방지). `delwin`은 free.
+- **`build.sh` 수정 (중요)**:
+  - `vers.c`/`wizard.c`를 **다시 포함**(원본 제외 목록은 잘못 — `encstr`/`statlist`/`whatis`/`create_obj`/`passwd` 등 링크에 필수).
+  - `md_readchar` 비활성화 `-D`를 **`mdport.c` 단독 컴파일에만** 적용. 전역 적용하면 `io.c`의 *호출부*까지 바뀌어 브리지를 우회하고 심볼 중복됨.
+  - `-sEMULATE_FUNCTION_POINTER_CASTS=1` 추가: 데몬/퓨즈 디스패치(`(*d_func)(arg)`, `void(*)()`에 인자 1개)가 WASM 엄격 시그니처 검사에서 트랩 → 이 플래그로 해결.
 
 ## 6. 빌드 방법
 ```bash
@@ -81,12 +96,14 @@ bash rogue-kr-port/build.sh    # -> web/rogue.js + rogue.wasm
 4. `index.html` 로드 순서: `bridge.js` → `rogue.js`.
 
 ## 10. 다음 마일스톤 (권장 순서)
-1. **emcc 첫 빌드 + 디버깅 패스**: 누락 심볼은 `curses.h`/`web_curses.c`에 추가, mdport 스텁, 세이브 IDBFS. → 터미널이라도 브라우저에서 돌게.
-2. **UI 결선**(9단계) → 터치로 실제 플레이.
-3. **i18n.c 채우기**(8) → 한글 메시지 전면 적용.
-4. 기기 테스트·세이브 영속화·정적 호스팅 배포.
+1. ✅ **emcc 첫 빌드 + 디버깅 패스**: 완료(§5.1). `build.sh` → `web/rogue.js`/`rogue.wasm`, Node에서 렌더·입력 동작 확인, `web/index.html`로 브라우저 구동 가능.
+2. **메시지 훅 + i18n.c**(패치 #2, §8) → `endmsg()`에서 `web_emit_msg(tr_msg(...))` 호출, 한글 메시지 전면 적용. (지금은 메시지가 화면 상단 라인에 영어로 그려짐.)
+3. **UI 결선**(9단계) → React 터치 프로토타입을 실엔진에 연결, 터치로 실제 플레이.
+4. **INV_OVER 오버레이 → JS 바텀시트 분기**(§11) → 인벤토리/도움말 메뉴 표시.
+5. 기기 테스트·세이브 영속화(IDBFS `FS.syncfs`)·정적 호스팅 배포.
 
 ## 11. 알려진 리스크
-- Asyncify로 `getch` 블로킹을 푸는 구조라, 스택 사이즈(`-sASYNCIFY_STACK_SIZE`) 조정이 필요할 수 있음.
-- Rogue의 `hw` scratch 윈도우(인벤토리/도움말 목록)는 현재 단일 정적 윈도우로 처리 — 메뉴를 바텀시트로 빼려면 `wrefresh(scratch)` 경로를 JS 오버레이로 분기 필요.
-- 첫 빌드에서 `curses.h`가 커버 못 한 매크로/심볼이 나올 수 있음(설계상 "첫 컴파일에서 확장" 전제).
+- Asyncify로 `getch` 블로킹을 푸는 구조라, 스택 사이즈(`-sASYNCIFY_STACK_SIZE`) 조정이 필요할 수 있음. `-sEMULATE_FUNCTION_POINTER_CASTS=1`과 함께 쓰고 있는데(데몬 디스패치 때문) 둘 다 켠 상태로 빌드/구동은 확인됨. 장기적으로는 데몬/퓨즈 함수 시그니처를 통일해 `EMULATE_FUNCTION_POINTER_CASTS`를 떼는 게 더 가벼움.
+- 인벤토리/도움말은 기본 `inv_type = INV_OVER`라 별도 윈도(`tw`/`sw`)에 그려짐. `newwin`/`subwin`을 분리 malloc해 크래시는 없지만, 이 윈도는 `stdscr`가 아니라 **JS UI로 push되지 않음** → 메뉴가 화면에 안 뜸. `wrefresh(w!=stdscr)` 경로를 JS 오버레이/바텀시트로 분기해야 함(§10.4).
+- 메시지(패치 #2)가 아직 미적용이라 게임 메시지가 화면 0행에 영어로 그려짐 — i18n 단계에서 `web_emit_msg`로 전환.
+- 세이브/스코어 영속화(IDBFS)는 아직 미연결 — 현재 MEMFS라 새로고침 시 세이브 소실.
