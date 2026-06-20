@@ -36,12 +36,15 @@ rogue-kr-port/
 │  ├─ curses.h                 ← Rogue의 <curses.h>를 가로채는 대체 헤더
 │  ├─ web_curses.c             ← curses 셰임 + md_readchar + web_emit_msg.
 │  │                              dual-mode(네이티브/emscripten). -Wall 무경고 검증됨.
-│  ├─ i18n.h / i18n.c          ← EN→KO `tr_msg()`(정적 메시지 테이블 ~101개, 미등록은
-│  │                              passthrough) + UTF-8 조사 엔진(kr_eul_reul 등).
-│  │                              `gcc -DI18N_DEMO`로 자가검증. (패치 #2가 endmsg에서 호출)
+│  ├─ i18n.h / i18n.c          ← EN→KO 번역 엔진. `tr_msg`(정적표+동적 프레임+조사),
+│  │                              `kr_item`(아이템명), `tr_screen`(도움말/죽음 화면),
+│  │                              명사 사전(몬스터26/식별/색/장비). `gcc -DI18N_DEMO` 자가검증.
+│  └─ patches.sh               ← 빌드 시 rogue/에 멱등 적용하는 소스 패치(메시지 훅 #2 +
+│                                 inv_name 래퍼 #4). build.sh가 호출.
 └─ web/
-   └─ bridge.js                ← WASM 엔진 ↔ 터치 UI 연결. 화면버퍼/메시지/입력큐 +
-                                  RogueInput(터치→키맵). 하단에 UI 결선 4단계 가이드.
+   ├─ bridge.js                ← WASM 엔진 ↔ 터치 UI 연결. 화면버퍼/메시지/입력큐 +
+   │                              RogueInput(터치→키맵). 하단에 UI 결선 4단계 가이드.
+   └─ headless-test.js         ← 브라우저 없이 Node로 i18n 훅 검증(한글 메시지 PASS).
 ```
 
 ## 5. 현재 상태 (정확히)
@@ -50,16 +53,25 @@ rogue-kr-port/
 - ✅ **JS 브리지 / 빌드 스크립트 / 패치 명세**: 작성 완료.
 - ✅ **emcc 풀빌드 완료**: `build.sh`로 `web/rogue.js`(+`rogue.wasm`) 생성. 33개 원본 `.c` 전부 컴파일 + 링크 성공.
 - ✅ **런타임 검증(Node)**: 엔진이 던전을 렌더(드로콜 2000+), `@`/몬스터/아이템/상태줄 표시, 키 입력→이동/공격/계단/종료 동작 확인. 브라우저용 최소 터미널 렌더러 `web/index.html` 추가.
-- ✅ **메시지 훅(패치 #2) 적용 + i18n 1차**: `build.sh`가 `io.c` endmsg()의 상단 라인 그리기를
-  `web_emit_msg(tr_msg(msgbuf))`로 멱등 치환(클론마다 자동, gitignore된 `rogue/` 무수정 커밋).
-  `webcurses/i18n.c`에 정적 메시지 ~101개 한글 테이블 + UTF-8 조사 엔진 작성·검증.
-  미등록 메시지는 영어 passthrough라 게임은 안 깨짐.
+- ✅ **i18n 완성 (메시지·이름·화면 텍스트) — emcc 6.0.0로 풀 검증**:
+  - **메시지 훅**(패치 #2): `io.c` endmsg()의 라인 그리기를 `web_emit_msg(tr_msg(msgbuf))`로
+    멱등 치환(`webcurses/patches.sh`, gitignore된 `rogue/`에 빌드 시 적용).
+  - **`tr_msg`**(webcurses/i18n.c): 정적 메시지 테이블(~120, ASCII 대소문자 무시 매칭) +
+    동적 프레임 엔진(전투 명중/빗나감/처치, 줍기/버리기/장착/착용/먹기, 금화, 레벨업, 마법
+    글로우·식별, 발사체, 입력 검증, get_item 프롬프트) + UTF-8 **조사 엔진**(을/를·이/가·은/는·
+    으로/로, ㄹ받침 예외).
+  - **아이템 이름**(패치 #4): `inv_name`을 `kr_item()`으로 감싸(things.c 래퍼) 물약/두루마리/
+    반지/지팡이/무기/갑옷(+강화 `[방어 N]`)/음식/금화/부적 + 착용표시 + 개수까지 한글화.
+    인벤토리 화면과 메시지 공용. 몬스터 26종·식별 사전·색상 사전 포함.
+  - **화면 텍스트**(`tr_screen`, web_curses.c `waddstr` 경유): 죽음 화면(stdscr, 렌더됨)·
+    도움말·`--More--`/계속 프롬프트. 상태줄·맵·한글 아이템명은 통과.
+  - **검증**: `gcc -DI18N_DEMO` 단위테스트 전부 통과 + `node web/headless-test.js` +
+    인게임(드롭/먹기/장착/검증 메시지 한글 확인).
 - ❌ **아직 안 된 것**:
-  1. **메시지 i18n 2차(동적/조각 메시지)**: 아이템·몬스터 이름이 끼는 조각 concat 메시지
-     (`"there is %s to pick up"` 등)는 아직 영어 passthrough. 키 템플릿으로 리팩터 + 한글
-     이름 테이블 + `kr_*` 조사 적용 필요(§8). 상태줄 stats 훅(§9.3)도 미연결.
+  1. **상태줄 stats 훅**(§9.3) 미연결 — 상태줄은 의도적으로 영어/숫자 유지(JS 상태바로 대체 예정).
   2. **모바일 터치 UI 결선**(프로토타입 → 실엔진, §9). 현재 `index.html`은 키보드/간이 D-패드만.
-  3. **INV_OVER 인벤/도움말 오버레이**가 별도 윈도(`tw`/`sw`)로 그려져 JS UI에 안 뜸(§11, 바텀시트로 분기 필요).
+  3. **INV_OVER 인벤/전체도움말 오버레이**가 별도 윈도(`hw`/`tw`/`sw`)로 그려져 JS UI에 안 뜸(§11).
+     텍스트는 한글화돼 있으니, 오버레이를 JS로 push하면 바로 한글로 표시됨.
 
 ### 5.1 emcc 빌드에서 실제로 필요했던 것 (이번 핸드오프에서 해결)
 설계상 "첫 컴파일에서 확장" 전제대로, 다음을 추가/수정함:
@@ -85,10 +97,14 @@ node web/headless-test.js      # '>'/'<'/'Q' -> 한글 메시지 PASS
 검증 환경: **emscripten 6.0.0**으로 풀빌드 + Node 구동 확인됨(정적 메시지 한글 방출 PASS).
 주요 플래그: `-I webcurses`(우리 curses.h 우선), `-sASYNCIFY`(blocking getch→`emscripten_sleep`), `-sFORCE_FILESYSTEM`(세이브), `-sALLOW_MEMORY_GROWTH`.
 
-## 7. 원본 패치 3개 (build.sh에도 명시)
+## 7. 원본 패치 (전부 `webcurses/patches.sh`에서 멱등 적용; build.sh가 호출)
 1. **include**: 패치 불필요 — `-I webcurses`로 `#include <curses.h>`가 자동으로 셰임에 연결.
-2. **메시지 훅**: `io.c`의 `endmsg()` 끝에서 완성된 메시지 버퍼를 `web_emit_msg(tr_msg(buf))`로 보내고 curses 메시지 라인 그리기는 생략. **여기서 한글화 리팩터링이 일어남**(아래 8).
-3. **입력**: `mdport.c`의 `md_readchar`를 `-Dmd_readchar=__rogue_native_readchar_unused`로 비활성화해 셰임 정의가 우선되게. `md_*tty`/시그널 관련 터미널 호출은 브라우저용 no-op 스텁.
+2. **메시지 훅(패치 #2)**: `io.c` `endmsg()`의 `mvaddstr(0,0,msgbuf)`를 `web_emit_msg(tr_msg(msgbuf))`로
+   치환 + extern 선언 삽입. 완성된 메시지가 한글로 우리 로그에 감.
+3. **입력**: `mdport.c`의 `md_readchar`를 `-Dmd_readchar=__rogue_native_readchar_unused`로 비활성화해 셰임 정의가 우선되게(build.sh에서 mdport.c 단독 컴파일에만 적용). `md_*tty`/시그널은 no-op 스텁.
+4. **아이템 이름(패치 #4)**: `things.c`의 `inv_name`을 `inv_name_en`으로 개명하고, `kr_item(inv_name_en(...))`를
+   호출해 결과를 `prbuf`에 되돌려 주는 얇은 래퍼로 감쌈. 인벤토리·메시지의 아이템명이 한글로.
+5. **화면 텍스트**: 패치 아님 — `web_curses.c`의 `waddstr`가 `tr_screen()`을 거쳐 도움말/죽음 화면/프롬프트를 한글화.
 
 추가: 세이브/스코어 파일은 `FORCE_FILESYSTEM` + IDBFS 마운트 후 `FS.syncfs()`로 영속화.
 
@@ -109,7 +125,7 @@ node web/headless-test.js      # '>'/'<'/'Q' -> 한글 메시지 PASS
 
 ## 10. 다음 마일스톤 (권장 순서)
 1. ✅ **emcc 첫 빌드 + 디버깅 패스**: 완료(§5.1). `build.sh` → `web/rogue.js`/`rogue.wasm`, Node에서 렌더·입력 동작 확인, `web/index.html`로 브라우저 구동 가능.
-2. ✅/◐ **메시지 훅 + i18n.c**(패치 #2, §8) → `endmsg()`에서 `web_emit_msg(tr_msg(...))` 호출(완료). 정적 메시지 한글화 완료. **남은 것: 동적/조각 메시지**(아이템·몬스터 이름) 키 템플릿 리팩터 + 한글 이름 테이블 + 조사 적용.
+2. ✅ **i18n 완료**(§5) → 메시지(`tr_msg` 정적+동적 프레임+조사), 아이템명(`kr_item`), 몬스터/식별 사전, 화면 텍스트(`tr_screen`, 도움말/죽음). emcc 6.0.0 풀빌드 + Node 헤드리스 + 인게임 검증. 남은 연동: 상태줄 stats 훅(§9.3)·오버레이 렌더(§11).
 3. **UI 결선**(9단계) → React 터치 프로토타입을 실엔진에 연결, 터치로 실제 플레이.
 4. **INV_OVER 오버레이 → JS 바텀시트 분기**(§11) → 인벤토리/도움말 메뉴 표시.
 5. 기기 테스트·세이브 영속화(IDBFS `FS.syncfs`)·정적 호스팅 배포.
