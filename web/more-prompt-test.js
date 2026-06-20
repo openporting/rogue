@@ -34,13 +34,16 @@ function makeEngine(B, fixed) {
 
   const move = (y, x) => { cy = y; cx = x; };
   const clrtoeol = () => { for (let x = cx; x < COLS; x++) cur[cy][x] = " "; };
-  const mvaddstr = (y, x, s) => { move(y, x); for (const c of s) if (cx < COLS) cur[cy][cx++] = c; };
+  // web_curses.c writes one *byte* per cell, so a Korean string lands as its
+  // UTF-8 bytes spread across cells (each stored as a single char-code).
+  const putBytes = (s) => { for (const b of new TextEncoder().encode(s)) if (cx < COLS) cur[cy][cx++] = String.fromCharCode(b); };
+  const mvaddstr = (y, x, s) => { move(y, x); putBytes(s); };
   const refresh = () => {                                  // web_curses.c wrefresh(stdscr)
     for (let y = 0; y < ROWS; y++)
       for (let x = 0; x < COLS; x++)
         if (cur[y][x] !== shadow[y][x]) {
           shadow[y][x] = cur[y][x];
-          B.drawCell(y, x, cur[y][x].charCodeAt(0), 0);
+          B.drawCell(y, x, cur[y][x].charCodeAt(0) & 0xff, 0);
         }
     B.refresh();
   };
@@ -63,7 +66,7 @@ function makeEngine(B, fixed) {
   let mpos = 0, newpos = 0, msgbuf = "";
   const endmsg = () => {
     if (mpos) {                                            // chained message -> pager
-      mvaddstr(0, mpos, "--More--");
+      mvaddstr(0, mpos, "--계속--");                        // i18n'd "--More--" (tr_screen)
       refresh();
       let c; do { c = readchar(); if (hang) return; } while (c !== 32); // wait_for(' ')
     }
@@ -173,6 +176,31 @@ console.log("\n=== control (pre-fix endmsg): the bugs must still reproduce ===")
 {
   const { survived, hang } = runCombat(false, 5);          // freezes after the first hit
   check("combat freezes after the first turn without the fix", hang === true && survived < 5);
+}
+
+// The touch UI blocks stray map taps by reading RogueBridge.getPrompt(); verify
+// that contract directly. (The thin DOM handler is just `if getPrompt() is
+// item/yesno -> open keypad, swallow the move`.)
+function freshBridge() {
+  delete require.cache[require.resolve(path.join(__dirname, "bridge.js"))];
+  global.window = {};
+  require(path.join(__dirname, "bridge.js"));
+  return global.window.RogueBridge;
+}
+console.log("\n=== prompt signal the UI uses to block taps ===");
+{
+  const B = freshBridge();
+  check("no prompt at rest", B.getPrompt() === null);
+  B.msg("어느 것을 들까? (* = 목록): ");
+  check("Korean item prompt detected", B.getPrompt() === "item");
+  B.msg("'z'는 올바른 항목이 아니다");
+  check("a normal message clears the prompt", B.getPrompt() === null);
+  B.msg("Which object do you want to drop? (* for list): ");
+  check("English item prompt detected (fallback)", B.getPrompt() === "item");
+  B.pushKey("a");
+  check("answering a prompt clears it (no wedge after ESC/answer)", B.getPrompt() === null);
+  B.msg("정말 종료하겠는가?");
+  check("quit confirm detected as yes/no", B.getPrompt() === "yesno");
 }
 
 if (failures === 0) {

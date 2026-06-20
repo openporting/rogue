@@ -19,9 +19,27 @@
   let overlay = null;          // current overlay sheet (array of text lines) or null
   let overlayBuf = null;       // accumulator between overlayBegin/overlayEnd
   let moreActive = false;      // is a "--More--" pager currently on row 0?
+  let promptKind = null;       // "item" | "yesno" when the engine is blocked on a prompt
+  const moreDecoder = new TextDecoder("utf-8");  // row 0 holds UTF-8 bytes per cell
   const keyQueue = [];
   const listeners = new Set();
   const notify = () => listeners.forEach((cb) => cb());
+
+  /* Is this freshly-emitted log line the engine asking for a single keystroke
+     (an item letter, a yes/no), rather than a normal message? Such prompts route
+     through msg() like everything else, so the newest line is the only signal we
+     get that readchar() is now waiting for an *answer*, not a command. The UI
+     uses this (getPrompt) to stop a map tap/swipe from being injected as a stray
+     move — which the prompt would reject as "''는 올바른 항목이 아니다" — and to
+     pop the answer keypad instead. Direction prompts ("which direction?") are
+     deliberately NOT flagged: there a one-tap move IS the right answer.
+       item : get_item — "...? (* for list): " / "어느 것을 …까? (* = 목록): "
+       yesno: the quit confirmation. */
+  function detectPrompt(line) {
+    if (/\(\*\s*=\s*목록\)|\(\* for list\)/.test(line)) return "item";
+    if (/정말 종료하겠는가|really quit/.test(line)) return "yesno";
+    return null;
+  }
 
   window.RogueBridge = {
     /* ---- called by C (engine -> UI) ---- */
@@ -36,10 +54,17 @@
       // whenever a turn emits 2+ messages, so the player can read the earlier one
       // before it's overwritten (io.c endmsg). There's no spacebar on mobile, and
       // our Korean log already keeps the full history, so the pause is pointless —
-      // feed the space ourselves. The marker lives only on row 0 (translated to
-      // "--계속--"); rising-edge so each --More-- gets exactly one space. Each
-      // pager step is preceded by a cleared-row-0 refresh, so the edge re-arms.
-      const row0 = screen[0].map((c) => c.ch).join("");
+      // feed the space ourselves. Rising-edge so each --More-- gets exactly one
+      // space; endmsg clears row 0 after the pause, so the edge re-arms next time.
+      //
+      // The marker is i18n'd to "--계속--", and drawCell stores one UTF-8 *byte*
+      // per cell, so the row is a byte string — joining the cells never spells the
+      // multibyte "계속". Decode the row back to text before matching, or the
+      // pager is never detected and the game hangs on the first --More-- (this is
+      // exactly the equip / after-first-hit combat freeze). "More" is kept as a
+      // fallback for any untranslated build.
+      const bytes = Uint8Array.from(screen[0], (c) => c.ch.charCodeAt(0) & 0xff);
+      const row0 = moreDecoder.decode(bytes);
       const hasMore = row0.indexOf("계속") !== -1 || row0.indexOf("More") !== -1;
       if (hasMore && !moreActive) keyQueue.push(32);
       moreActive = hasMore;
@@ -48,10 +73,15 @@
     clearScreen() {
       for (let y = 0; y < ROWS; y++)
         for (let x = 0; x < COLS; x++) screen[y][x] = { ch: " ", attr: 0 };
+      promptKind = null;
       notify();
     },
     msg(korean) {
       messages = [korean, ...messages].slice(0, 50);
+      // The newest line tells us whether the engine is now blocked on a prompt
+      // (waiting for an item letter / y-n) vs. just reporting an event. A normal
+      // message therefore clears any prior prompt state.
+      promptKind = detectPrompt(korean);
       // §10-#5 audio: react to the (already-Korean) message with a sound effect.
       // Guarded so the bridge still works if audio.js isn't loaded.
       if (window.RogueAudio) window.RogueAudio.onMessage(korean);
@@ -77,6 +107,11 @@
     /* ---- called by the touch UI (UI -> engine) ---- */
     pushKey(code) {
       keyQueue.push(typeof code === "string" ? code.charCodeAt(0) : code);
+      // Any key the UI sends while a prompt is up is the player's answer (or an
+      // ESC to bail). Clear the flag optimistically: if the key was invalid the
+      // engine re-issues the prompt and msg() sets it again, but if it was valid
+      // (or ESC, which emits no new line) we must not stay wedged in prompt mode.
+      promptKind = null;
     },
     subscribe(cb) { listeners.add(cb); return () => listeners.delete(cb); },
     getScreen() { return screen; },
@@ -87,6 +122,11 @@
     /* dismiss the overlay from the UI (e.g. the close button) without waiting
      * for the engine's redraw; the engine itself is unblocked via a key press. */
     closeOverlay() { if (overlay) { overlay = null; notify(); } },
+
+    /* "item" / "yesno" when the engine is waiting for a single-key answer, else
+     * null. The touch UI reads this to block stray map taps from being fed to a
+     * prompt and to pop the answer keypad instead. */
+    getPrompt() { return promptKind; },
 
     /* ---- derived reads the touch UI uses (no engine changes needed) ---- */
 
