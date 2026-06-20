@@ -102,7 +102,11 @@ int addch(int ch)                 { return waddch(stdscr, ch); }
 int mvaddch(int y, int x, int ch) { return move(y, x) == OK ? addch(ch) : ERR; }
 
 /* ---- strings ---- */
-int waddstr(WINDOW *w, const char *s) { while (*s) waddch(w, (unsigned char)*s++); return OK; }
+/* Screen text (help/death/prompts) bypasses the msg() path, so localize whole
+ * strings here. tr_screen() exact-matches known screen strings and passes
+ * everything else (status line, Korean item names, the map) through. */
+extern const char *tr_screen(const char *);
+int waddstr(WINDOW *w, const char *s) { s = tr_screen(s); while (*s) waddch(w, (unsigned char)*s++); return OK; }
 int addstr(const char *s)             { return waddstr(stdscr, s); }
 int mvaddstr(int y, int x, const char *s)            { return move(y, x) == OK ? addstr(s) : ERR; }
 int mvwaddstr(WINDOW *w, int y, int x, const char *s){ return wmove(w, y, x) == OK ? waddstr(w, s) : ERR; }

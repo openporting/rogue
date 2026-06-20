@@ -743,6 +743,78 @@ static const char *normalize_first(const char *en, char *buf, size_t cap)
     return buf;
 }
 
+/* ---- tr_screen: strings drawn straight to the curses screen ---------------
+ * Help screen (helpstr[]), death tombstone (rip[]), and a few fixed prompts go
+ * to the screen via waddstr(), not through endmsg(). Exact full-string match;
+ * the killer name on the tombstone falls back to the monster dictionary. */
+static const struct kv SCREEN[] = {
+    /* death screen + common screen prompts */
+    { "                  |   killed by a    |\n", "                  |   ...에게 죽다   |\n" },
+    { "Killed by ",                 "사망 원인: " },
+    { "[Press return to continue]", "[계속하려면 Enter]" },
+    { "--Press space to continue--","--계속하려면 스페이스--" },
+    { "--More--",                   "--계속--" },
+    { "starvation",                 "굶주림" },
+    { "hypothermia",                "저체온증" },
+    /* help screen command descriptions (helpstr[]; shown once §11 renders the
+     * help overlay — translated here as data so it is ready) */
+    { "\tprints help",            "\t도움말 출력" },
+    { "\tidentify object",        "\t기호 설명" },
+    { "\tleft",  "\t왼쪽" },  { "\tdown", "\t아래" },
+    { "\tup",    "\t위" },     { "\tright","\t오른쪽" },
+    { "\tup & left",  "\t왼쪽 위" }, { "\tup & right",  "\t오른쪽 위" },
+    { "\tdown & left","\t왼쪽 아래" },{ "\tdown & right","\t오른쪽 아래" },
+    { "\trun left", "\t왼쪽으로 달리기" }, { "\trun down", "\t아래로 달리기" },
+    { "\trun up",   "\t위로 달리기" },     { "\trun right","\t오른쪽으로 달리기" },
+    { "\tsearch for trap/secret door", "\t함정/비밀문 탐색" },
+    { "\tgo down a staircase",     "\t계단 내려가기" },
+    { "\tgo up a staircase",       "\t계단 올라가기" },
+    { "\trest for a turn",         "\t한 턴 쉬기" },
+    { "\tpick something up",       "\t줍기" },
+    { "\tinventory",               "\t소지품" },
+    { "\tinventory single item",   "\t개별 소지품 보기" },
+    { "\tquaff potion",            "\t물약 마시기" },
+    { "\tread scroll",             "\t두루마리 읽기" },
+    { "\teat food",                "\t음식 먹기" },
+    { "\twield a weapon",          "\t무기 장착" },
+    { "\twear armor",              "\t갑옷 입기" },
+    { "\ttake armor off",          "\t갑옷 벗기" },
+    { "\tput on ring",             "\t반지 끼기" },
+    { "\tremove ring",             "\t반지 빼기" },
+    { "\tdrop object",             "\t물건 버리기" },
+    { "\tcall object",             "\t이름 붙이기" },
+    { "\trepeat last command",     "\t마지막 명령 반복" },
+    { "\tprint current weapon",    "\t현재 무기 보기" },
+    { "\tprint current armor",     "\t현재 갑옷 보기" },
+    { "\tprint current rings",     "\t현재 반지 보기" },
+    { "\tprint current stats",     "\t현재 능력치 보기" },
+    { "\trecall what's been discovered", "\t발견 목록 보기" },
+    { "\texamine/set options",     "\t설정 보기/변경" },
+    { "\tredraw screen",           "\t화면 다시 그리기" },
+    { "\trepeat last message",     "\t마지막 메시지 반복" },
+    { "\tcancel command",          "\t명령 취소" },
+    { "\tsave game",               "\t게임 저장" },
+    { "\tquit",                    "\t종료" },
+    { "\tshell escape",            "\t셸 빠져나가기" },
+    { "\tprint version number",    "\t버전 출력" },
+    { "<dir>\tfight till death or near death", "<dir>\t죽을 때까지 싸우기" },
+    { "<dir>\tthrow something",    "<dir>\t던지기" },
+    { "<dir>\tmove onto without picking up", "<dir>\t줍지 않고 이동" },
+    { "<dir>\tzap a wand in a direction", "<dir>\t마법봉 쏘기" },
+    { "<dir>\tidentify trap type", "<dir>\t함정 종류 식별" },
+    { "<dir>\tfight till either of you dies", "<dir>\t둘 중 하나가 죽을 때까지 싸우기" },
+};
+
+const char *tr_screen(const char *s)
+{
+    if (s == NULL) return s;
+    for (int i = 0; i < (int)(sizeof(SCREEN) / sizeof(SCREEN[0])); i++)
+        if (strcmp(SCREEN[i].en, s) == 0)
+            return SCREEN[i].ko;
+    const char *m = DICT(MONSTER, s);   /* tombstone killer name */
+    return m ? m : s;
+}
+
 const char *tr_msg(const char *en)
 {
     if (en == NULL)
@@ -865,6 +937,22 @@ int main(void)
         int bad = strcmp(got, frames[i].ko) != 0;
         printf("%-36s -> %s%s\n", frames[i].en, got, bad ? "   <-- FAIL" : "");
         if (bad) { fails++; printf("    expected: %s\n", frames[i].ko); }
+    }
+
+    /* screen text (tr_screen): help/death/prompts + killer fallback */
+    struct { const char *en; const char *ko; } scr[] = {
+        { "Killed by ",                 "사망 원인: " },
+        { "[Press return to continue]", "[계속하려면 Enter]" },
+        { "hobgoblin",                  "홉고블린" },        /* tombstone killer */
+        { "\teat food",                 "\t음식 먹기" },
+        { "Level: 1  Gold: 0",          "Level: 1  Gold: 0" }, /* status: passthrough */
+    };
+    printf("\n--- tr_screen ---\n");
+    for (int i = 0; i < (int)(sizeof(scr)/sizeof(scr[0])); i++) {
+        const char *got = tr_screen(scr[i].en);
+        int bad = strcmp(got, scr[i].ko) != 0;
+        printf("%-28s -> %s%s\n", scr[i].en, got, bad ? "  <-- FAIL" : "");
+        if (bad) { fails++; printf("    expected: %s\n", scr[i].ko); }
     }
 
     printf(fails ? "\n%d FAILURES\n" : "\nALL OK\n", fails);

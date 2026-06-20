@@ -27,6 +27,12 @@ const char *tr_msg(const char *en);
  * Returns a static buffer valid until the next kr_item() call. */
 char *kr_item(const char *en);
 
+/* Translate a string drawn straight to the curses screen (help screen, death
+ * tombstone, fixed prompts) — these bypass the msg() path. web_curses.c routes
+ * waddstr() through this. Exact full-string match only; everything else
+ * (status line, already-Korean item names, the map) passes through unchanged. */
+const char *tr_screen(const char *s);
+
 /* 1 if the last Unicode syllable of `word` carries a 받침 (final consonant),
  * 0 otherwise (including non-Hangul tails). UTF-8 input. */
 int kr_has_batchim(const char *word);
