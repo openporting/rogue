@@ -38,6 +38,9 @@
   .title{ font-size:11px; letter-spacing:3px; text-transform:uppercase; color:var(--emberDim); font-weight:700; }
   .depth{ font-family:var(--mono); font-size:13px; color:var(--parch); background:var(--floor);
           border:1px solid var(--edge); border-radius:6px; padding:2px 9px; }
+  #sound{ background:var(--floor); border:1px solid var(--edge); border-radius:6px; color:var(--parch);
+          font-size:14px; line-height:1; padding:3px 7px; transition:transform .05s, opacity .15s; }
+  #sound.muted{ opacity:.45; }
   .hp-row{ margin-top:10px; display:flex; align-items:center; gap:12px; }
   .hp-wrap{ flex:1; }
   .hp-track{ height:9px; border-radius:5px; background:var(--edge); overflow:hidden; border:1px solid var(--edge); }
@@ -130,7 +133,10 @@
     <header>
       <div class="title-row">
         <div class="title">운명의 던전</div>
-        <div class="depth" id="depth">–층</div>
+        <div style="display:flex; align-items:center; gap:8px;">
+          <button id="sound" class="press" aria-label="소리 켜기/끄기" title="소리">🔈</button>
+          <div class="depth" id="depth">–층</div>
+        </div>
       </div>
       <div class="hp-row">
         <div class="hp-wrap">
@@ -180,6 +186,7 @@
 </div>
 
 <script src="bridge.js"></script>
+<script src="audio.js"></script>
 <script>
 (function () {
   const B = window.RogueBridge, I = window.RogueInput;
@@ -256,6 +263,7 @@
     // ── status bar (parsed off the engine's English status row) ──
     const st = B.getStats();
     if (st) {
+      if (A && st.depth !== lastDepth) { A.setDepth(st.depth); lastDepth = st.depth; }
       document.getElementById("depth").textContent = st.depth + "층";
       document.getElementById("lv").textContent = st.level;
       document.getElementById("str").textContent = st.str;
@@ -308,7 +316,31 @@
   document.getElementById("ovl-go").addEventListener("click", overlayContinue);
   ovlScrim.addEventListener("click", overlayContinue);
 
-  const buzz = () => navigator.vibrate && navigator.vibrate(8);
+  const A = window.RogueAudio;
+  // haptics + first-gesture audio unlock (mobile autoplay policy needs a gesture).
+  const buzz = () => { if (A) A.unlock(); navigator.vibrate && navigator.vibrate(8); };
+  // also unlock on the very first touch/key even if it isn't a button press.
+  ["pointerdown", "keydown"].forEach((ev) =>
+    window.addEventListener(ev, () => A && A.unlock(), { once: true, passive: true }));
+
+  // 🔈 sound toggle (mute persists in localStorage via RogueAudio).
+  const soundBtn = document.getElementById("sound");
+  function paintSound() {
+    if (!A) return;
+    const muted = A.getState().muted;
+    soundBtn.textContent = muted ? "🔇" : "🔊";
+    soundBtn.classList.toggle("muted", muted);
+  }
+  paintSound();
+  soundBtn.addEventListener("click", (e) => {
+    e.stopPropagation();
+    if (!A) return;
+    A.unlock();            // ensure the context exists before (un)muting
+    A.toggleMute();
+    paintSound();
+  });
+
+  let lastDepth = 0;       // drives the BGM retune + descend cue
 
   /* ── tap a tile → step one square toward it (engine resolves walls). While an
      overlay/prompt is up (no @ on screen), a tap advances it (Space). ── */
