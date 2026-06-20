@@ -34,8 +34,11 @@ rogue-kr-port/
 │                                  횃불 시야 + 조사 자동처리(을/를·이/가) 시연 포함.
 ├─ webcurses/
 │  ├─ curses.h                 ← Rogue의 <curses.h>를 가로채는 대체 헤더
-│  └─ web_curses.c             ← curses 셰임 + md_readchar + web_emit_msg.
-│                                 dual-mode(네이티브/emscripten). -Wall 무경고 검증됨.
+│  ├─ web_curses.c             ← curses 셰임 + md_readchar + web_emit_msg.
+│  │                              dual-mode(네이티브/emscripten). -Wall 무경고 검증됨.
+│  ├─ i18n.h / i18n.c          ← EN→KO `tr_msg()`(정적 메시지 테이블 ~101개, 미등록은
+│  │                              passthrough) + UTF-8 조사 엔진(kr_eul_reul 등).
+│  │                              `gcc -DI18N_DEMO`로 자가검증. (패치 #2가 endmsg에서 호출)
 └─ web/
    └─ bridge.js                ← WASM 엔진 ↔ 터치 UI 연결. 화면버퍼/메시지/입력큐 +
                                   RogueInput(터치→키맵). 하단에 UI 결선 4단계 가이드.
@@ -47,8 +50,14 @@ rogue-kr-port/
 - ✅ **JS 브리지 / 빌드 스크립트 / 패치 명세**: 작성 완료.
 - ✅ **emcc 풀빌드 완료**: `build.sh`로 `web/rogue.js`(+`rogue.wasm`) 생성. 33개 원본 `.c` 전부 컴파일 + 링크 성공.
 - ✅ **런타임 검증(Node)**: 엔진이 던전을 렌더(드로콜 2000+), `@`/몬스터/아이템/상태줄 표시, 키 입력→이동/공격/계단/종료 동작 확인. 브라우저용 최소 터미널 렌더러 `web/index.html` 추가.
+- ✅ **메시지 훅(패치 #2) 적용 + i18n 1차**: `build.sh`가 `io.c` endmsg()의 상단 라인 그리기를
+  `web_emit_msg(tr_msg(msgbuf))`로 멱등 치환(클론마다 자동, gitignore된 `rogue/` 무수정 커밋).
+  `webcurses/i18n.c`에 정적 메시지 ~101개 한글 테이블 + UTF-8 조사 엔진 작성·검증.
+  미등록 메시지는 영어 passthrough라 게임은 안 깨짐.
 - ❌ **아직 안 된 것**:
-  1. **메시지 훅(패치 #2) 미적용** → 메시지가 아직 curses 상단 라인에 그려짐. i18n(`tr_msg`/`web_emit_msg`) 미연결.
+  1. **메시지 i18n 2차(동적/조각 메시지)**: 아이템·몬스터 이름이 끼는 조각 concat 메시지
+     (`"there is %s to pick up"` 등)는 아직 영어 passthrough. 키 템플릿으로 리팩터 + 한글
+     이름 테이블 + `kr_*` 조사 적용 필요(§8). 상태줄 stats 훅(§9.3)도 미연결.
   2. **모바일 터치 UI 결선**(프로토타입 → 실엔진, §9). 현재 `index.html`은 키보드/간이 D-패드만.
   3. **INV_OVER 인벤/도움말 오버레이**가 별도 윈도(`tw`/`sw`)로 그려져 JS UI에 안 뜸(§11, 바텀시트로 분기 필요).
 
@@ -97,7 +106,7 @@ bash rogue-kr-port/build.sh    # -> web/rogue.js + rogue.wasm
 
 ## 10. 다음 마일스톤 (권장 순서)
 1. ✅ **emcc 첫 빌드 + 디버깅 패스**: 완료(§5.1). `build.sh` → `web/rogue.js`/`rogue.wasm`, Node에서 렌더·입력 동작 확인, `web/index.html`로 브라우저 구동 가능.
-2. **메시지 훅 + i18n.c**(패치 #2, §8) → `endmsg()`에서 `web_emit_msg(tr_msg(...))` 호출, 한글 메시지 전면 적용. (지금은 메시지가 화면 상단 라인에 영어로 그려짐.)
+2. ✅/◐ **메시지 훅 + i18n.c**(패치 #2, §8) → `endmsg()`에서 `web_emit_msg(tr_msg(...))` 호출(완료). 정적 메시지 한글화 완료. **남은 것: 동적/조각 메시지**(아이템·몬스터 이름) 키 템플릿 리팩터 + 한글 이름 테이블 + 조사 적용.
 3. **UI 결선**(9단계) → React 터치 프로토타입을 실엔진에 연결, 터치로 실제 플레이.
 4. **INV_OVER 오버레이 → JS 바텀시트 분기**(§11) → 인벤토리/도움말 메뉴 표시.
 5. 기기 테스트·세이브 영속화(IDBFS `FS.syncfs`)·정적 호스팅 배포.
