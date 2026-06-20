@@ -136,7 +136,20 @@ rogue-kr-port/
   - **검증**: `node web/persist-test.js`(Emscripten FS/IDBFS/ENV/런디펜던시 목으로 부팅 로드·argv 재개·exit
     flush·reset 전 항목 PASS) + `node --check`. 남은 것: 실기기/브라우저에서 풀빌드 결합 시 `md_gethomedir`가
     `$HOME`로 귀결되는지 최종 확인(아니면 `web_curses.c`에 `getpwuid` 셰임으로 `pw_dir=/save` 고정).
-- ❌ **아직 안 된 것**: (핵심 마일스톤 §10 전부 완료) 실기기 테스트 + 정적 호스팅 배포만 남음.
+- ✅ **정적 호스팅 배포 (CI/CD → GitHub Pages) (§10-#7) — 완료**: 엔진(WASM) 무수정. 빌드 산출물
+  (`web/rogue.js`/`.wasm`)과 엔진 소스(`/rogue/`)는 gitignore라 저장소에 없으므로 **CI가 매번 엔진을
+  클론 + Emscripten 6.0.0 셋업 + `build.sh`로 새로 빌드** 후 게시. `.github/workflows/deploy.yml`:
+  - **build 잡**(모든 push/PR/dispatch): 엔진 클론 → emsdk 6.0.0 → `bash build.sh` →
+    `node web/headless-test.js`(한글 i18n 훅 검증) + `node web/persist-test.js` → 런타임 파일만
+    `_site/`로 모아(`index.html`/`terminal.html`/`bridge.js`/`audio.js`/`persist.js`/`rogue.js`/
+    `rogue.wasm`/`.nojekyll`; Node 테스트·`*.o` 제외) Pages 아티팩트 업로드.
+  - **deploy 잡**(`main` push 또는 수동 dispatch 한정): `actions/deploy-pages`로 게시. PR/피처
+    브랜치는 build 잡까지만 → **CI 게이트**.
+  - **수동 1회 설정**: 저장소 Settings → Pages → Source = "GitHub Actions"(DEPLOY.md §1). 의존성 0
+    (바닐라 JS·외부 CDN 0·에셋 합성)이라 SharedArrayBuffer/pthreads 미사용 → COOP/COEP 헤더 불필요,
+    아무 정적 호스트나 가능. 절차·임의 호스트 배포·MIME(`.wasm`) 메모는 **DEPLOY.md** 참조.
+- ❌ **아직 안 된 것**: (핵심 마일스톤 §10 전부 완료 + 배포 파이프라인 완료) **실기기 플레이 검증**만
+  수동으로 남음(DEPLOY.md §4): 터치 입력·한글 로그, 오디오 첫 제스처 게이트, 세이브 이어하기.
 
 ### 5.1 emcc 빌드에서 실제로 필요했던 것 (이번 핸드오프에서 해결)
 설계상 "첫 컴파일에서 확장" 전제대로, 다음을 추가/수정함:
@@ -203,7 +216,10 @@ node web/headless-test.js      # '>'/'<'/'Q' -> 한글 메시지 PASS
    엔진 리빌드 0, 에셋·CDN 0. (§5 참고.) 남은 것: 실기기에서 풀빌드 결합 청취 확인 + BEL 셰임(§12.3, 선택).
 6. ✅ **세이브 영속화(IDBFS `FS.syncfs`)**(§5) → `web/persist.js`: `/save`에 IDBFS 마운트(=`$HOME`),
    부팅 시 `syncfs(true)` 로드 + 세이브 있으면 argv로 자동 이어하기, `onExit`에서 `syncfs(false)` 저장.
-   엔진 리빌드 0(빌드 플래그 `-lidbfs.js` + 런타임 심볼 export만). 남은 것: 기기 테스트·정적 호스팅 배포.
+   엔진 리빌드 0(빌드 플래그 `-lidbfs.js` + 런타임 심볼 export만).
+7. ✅ **정적 호스팅 배포(CI/CD → GitHub Pages)**(§5) → `.github/workflows/deploy.yml`: CI가 엔진 클론 +
+   emsdk 6.0.0 + `build.sh` 빌드 + 헤드리스 검증 후 `web/` 런타임을 Pages에 게시. `main`만 배포,
+   PR/피처는 빌드 게이트. 절차·임의 호스트 배포는 **DEPLOY.md**. 남은 것: 실기기 플레이 검증(수동).
 
 ## 11. 알려진 리스크
 - Asyncify로 `getch` 블로킹을 푸는 구조라, 스택 사이즈(`-sASYNCIFY_STACK_SIZE`) 조정이 필요할 수 있음. `-sEMULATE_FUNCTION_POINTER_CASTS=1`과 함께 쓰고 있는데(데몬 디스패치 때문) 둘 다 켠 상태로 빌드/구동은 확인됨. 장기적으로는 데몬/퓨즈 함수 시그니처를 통일해 `EMULATE_FUNCTION_POINTER_CASTS`를 떼는 게 더 가벼움.
