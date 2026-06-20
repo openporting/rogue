@@ -20,6 +20,10 @@ ROGUE_C=$(ls $SRC/*.c | grep -vE '/mdport\.c$')
 
 CFLAGS="-I$BRIDGE -I$SRC -DHAVE_CONFIG_H -O2"
 
+# Apply the idempotent source patches (message hook + Korean item names) to the
+# freshly-cloned, gitignored engine tree. See webcurses/patches.sh.
+bash "$BRIDGE/patches.sh" "$SRC"
+
 # mdport.c keeps every md_* function we need, but its native md_readchar() must
 # NOT win over the bridge's. The -D renames ONLY mdport's definition; io.c (the
 # sole caller) keeps calling the real md_readchar -> web_curses.c. Scoping the
@@ -33,6 +37,7 @@ emcc \
   $ROGUE_C \
   $OUT/mdport.o \
   $BRIDGE/web_curses.c \
+  $BRIDGE/i18n.c \
   $CFLAGS \
   -sASYNCIFY \
   -sASYNCIFY_STACK_SIZE=24576 \
@@ -53,14 +58,14 @@ echo "built -> $OUT/rogue.js (+ rogue.wasm)"
 # (1) curses include — none needed: -I port/webcurses puts our curses.h first,
 #     so every `#include <curses.h>` resolves to the bridge automatically.
 #
-# (2) message hook — at the end of endmsg() in io.c, after the final message
-#     string `buf` (or `msgbuf`) is assembled, add:
-#         extern void web_emit_msg(const char *);
-#         web_emit_msg(tr_msg(msgbuf));     // tr_msg = EN->KO (see i18n.c)
-#     and skip the curses message-line draw. This is also where the
-#     fragment-concatenation refactor lands: collapse the piecewise
-#     msg("there is ")+...+msg(" to pick up") sites into single keyed
-#     format strings so Korean word order / 조사 can be applied:
+# (2) message hook — APPLIED AUTOMATICALLY above (search "Patch #2"). Replaces
+#     endmsg()'s `mvaddstr(0, 0, msgbuf)` with `web_emit_msg(tr_msg(msgbuf))`,
+#     so the assembled line is translated (webcurses/i18n.c) and pushed to our
+#     parchment log instead of the curses top line. Static messages are in the
+#     i18n.c table; unmatched lines pass through (English) for now.
+#     NEXT WAVE: the fragment-concatenation refactor — collapse the piecewise
+#     msg("there is ")+...+msg(" to pick up") sites into single keyed format
+#     strings so Korean word order / 조사 (i18n.c kr_* helpers) can be applied:
 #         "there is %s to pick up"  ->  key PICKUP_HERE -> "여기 %s이(가) 있다."
 #
 # (3) input — md_readchar in mdport.c is renamed away by the -D above, so the
