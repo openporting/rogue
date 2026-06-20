@@ -47,6 +47,9 @@ rogue-kr-port/
    ├─ terminal.html            ← 80×25 원본 화면 그대로 보는 디버그 터미널 뷰.
    ├─ bridge.js                ← WASM 엔진 ↔ 터치 UI 연결. 화면버퍼/메시지/입력큐 +
    │                              RogueInput(터치→키맵) + getPlayer/getStats(버퍼 파싱).
+   │                              msg()가 RogueAudio.onMessage()로 효과음 트리거.
+   ├─ audio.js                 ← RogueAudio: Web Audio 합성 SFX 14종 + 생성형 던전 BGM
+   │                              (§10-#5). 에셋·CDN 0, localStorage 설정 영속화.
    └─ headless-test.js         ← 브라우저 없이 Node로 i18n 훅 검증(한글 메시지 PASS).
 ```
 
@@ -100,6 +103,20 @@ rogue-kr-port/
   0행을 비우는 refresh가 있어 엣지 재무장). 오버레이의 "계속 ▸"(인벤/도움말)와는 별개 — 오버레이는
   비-stdscr 윈도라 0행 감지에 안 걸리고 사용자가 직접 닫음. 검증: 실제 bridge 코드로 상승엣지
   단위테스트(연쇄 `--More--`·중복프레임 dedup·ASCII 폴백) PASS + wasm 수백 턴 구동 시 입력 데드락 없음.
+- ✅ **음향 (SFX + BGM) (§10-#5) — 완료**: 엔진(WASM) 무수정, 전부 `web/` 계층(`web/audio.js` 신규).
+  `RogueAudio` 싱글턴이 **외부 에셋·CDN 0**으로 Web Audio 합성만 사용 → 정적 호스팅·오프라인 동작.
+  - **첫 제스처 게이트**: 모바일 자동재생 정책 때문에 첫 탭/키에서 `RogueAudio.unlock()`
+    (UI `buzz()` + 일회성 `pointerdown/keydown` 리스너)으로 `AudioContext` 생성·resume + BGM 시작.
+  - **메시지 기반 SFX (§12.2)**: `bridge.js`의 `msg()`가 한글 메시지를 `RogueAudio.onMessage()`로
+    넘기고, 순서 있는 정규식 룰 14종이 첫 매칭으로 효과음 선택(타격/빗나감/처치/피격/금화/줍기/
+    물약/두루마리/레벨업/마법·함정/사망/허기/잘못된 입력). 키는 `tr_msg`가 정규화한 한국어라 안정적.
+    실제 i18n 출력 18케이스로 매칭 단위검증 PASS.
+  - **던전 BGM**: 깊이별로 음정이 가라앉는 생성형(generative) 드론 + 5음 펜타토닉 모테. `getStats().depth`
+    변화 시 `setDepth()`가 드론을 리튠하고 **하강 시 우우웅 큐** 재생(원작은 계단 메시지가 없으므로
+    유일한 신호). 잘못된 입력/`RogueBridge.bell()`은 짧은 블립.
+  - **설정 영속화**: sfx/bgm 볼륨·뮤트를 `localStorage`(`rogue.audio`)에 저장. 헤더에 🔈 토글(뮤트 시 🔇).
+  - **검증**: `node --check` + WebAudio/DOM 목으로 `audio.js` 헤드리스 스모크(unlock→음악 시작,
+    뮤트→정지·영속화, 볼륨 설정·영속화) PASS. i18n 회귀(`headless-test.js`)는 자체 스텁이라 무영향.
 - ❌ **아직 안 된 것**:
   1. **세이브/스코어 영속화**(IDBFS `FS.syncfs`) 미연결 — 현재 MEMFS라 새로고침 시 세이브 소실.
 
@@ -161,7 +178,9 @@ node web/headless-test.js      # '>'/'<'/'Q' -> 한글 메시지 PASS
    `web/terminal.html`. 남은 것: 브라우저/실기기에서 `rogue.js` 풀빌드와 결합한 플레이 검증.
 4. ✅ **INV_OVER 오버레이 → JS 바텀시트 분기**(§5) → 인벤토리/발견목록/도움말/설정 표시 완료.
    `wrefresh(w!=stdscr)` → `RogueBridge.overlay*` → `#ovl-scrim` 바텀시트. subwin alias 수정 포함.
-5. **음향(SFX + BGM)**(§12) → Web Audio로 효과음 세트 + 던전 BGM. 엔진 리빌드 없이 JS 계층에서.
+5. ✅ **음향(SFX + BGM)**(§12) → `web/audio.js`의 `RogueAudio`: 합성 효과음 14종(메시지 패턴 매칭) +
+   생성형 던전 BGM(깊이별 리튠·하강 큐). 첫 제스처 게이트, 🔈 토글, `localStorage` 설정 영속화.
+   엔진 리빌드 0, 에셋·CDN 0. (§5 참고.) 남은 것: 실기기에서 풀빌드 결합 청취 확인 + BEL 셰임(§12.3, 선택).
 6. 기기 테스트·세이브 영속화(IDBFS `FS.syncfs`)·정적 호스팅 배포.
 
 ## 11. 알려진 리스크

@@ -52,8 +52,16 @@
     },
     msg(korean) {
       messages = [korean, ...messages].slice(0, 50);
+      // §10-#5 audio: react to the (already-Korean) message with a sound effect.
+      // Guarded so the bridge still works if audio.js isn't loaded.
+      if (window.RogueAudio) window.RogueAudio.onMessage(korean);
       notify();
     },
+    /* Terminal BEL (\007). The engine drops it into the screen buffer today, so
+     * this is only called if web_curses.c's waddch is later taught to forward it
+     * (§12.3, a one-line shim boost). Invalid-input feedback already routes
+     * through msg()/onMessage(), so the audible cue works without that change. */
+    bell() { if (window.RogueAudio) window.RogueAudio.bell(); },
 
     /* Overlay seam (inventory / help / options / detection). The C side
      * (web_curses.c wrefresh of a non-stdscr window) streams one text line per
