@@ -34,8 +34,10 @@ rogue-kr-port/
 │                                  횃불 시야 + 조사 자동처리(을/를·이/가) 시연 포함.
 ├─ webcurses/
 │  ├─ curses.h                 ← Rogue의 <curses.h>를 가로채는 대체 헤더
-│  └─ web_curses.c             ← curses 셰임 + md_readchar + web_emit_msg.
-│                                 dual-mode(네이티브/emscripten). -Wall 무경고 검증됨.
+│  ├─ web_curses.c             ← curses 셰임 + md_readchar + web_emit_msg.
+│  │                              dual-mode(네이티브/emscripten). -Wall 무경고 검증됨.
+│  ├─ i18n.h / i18n.c          ← EN→KO `tr_msg()` + 조사 자동 처리 + 패턴 테이블.
+│  │                              endmsg() 훅(패치 #2)에서 호출. `-DI18N_TEST`로 네이티브 테스트.
 └─ web/
    └─ bridge.js                ← WASM 엔진 ↔ 터치 UI 연결. 화면버퍼/메시지/입력큐 +
                                   RogueInput(터치→키맵). 하단에 UI 결선 4단계 가이드.
@@ -47,8 +49,13 @@ rogue-kr-port/
 - ✅ **JS 브리지 / 빌드 스크립트 / 패치 명세**: 작성 완료.
 - ✅ **emcc 풀빌드 완료**: `build.sh`로 `web/rogue.js`(+`rogue.wasm`) 생성. 33개 원본 `.c` 전부 컴파일 + 링크 성공.
 - ✅ **런타임 검증(Node)**: 엔진이 던전을 렌더(드로콜 2000+), `@`/몬스터/아이템/상태줄 표시, 키 입력→이동/공격/계단/종료 동작 확인. 브라우저용 최소 터미널 렌더러 `web/index.html` 추가.
+- ✅ **메시지 훅(패치 #2) + i18n.c 1차 적용**: `build.sh`가 `io.c`의 `endmsg()`를 자동 패치해
+  `web_emit_msg(tr_msg(msgbuf))`로 보냄(상단 라인 그리기 대체). `webcurses/i18n.c`에 EN→KO
+  패턴 테이블 + 조사 자동 처리(`han_has_batchim`/`$N{을}` 등) + 영문 폴백을 구현. 네이티브
+  유닛 테스트(`gcc -DI18N_TEST i18n.c`) 통과. **단, 아직 1차**: §10.2 참고(전투 동사 변형 등 미번역분은 영문 폴백).
 - ❌ **아직 안 된 것**:
-  1. **메시지 훅(패치 #2) 미적용** → 메시지가 아직 curses 상단 라인에 그려짐. i18n(`tr_msg`/`web_emit_msg`) 미연결.
+  1. **i18n 테이블 보강** → 전투 hit/miss 동사 변형(`h_names`/`m_names`)·인벤/도움말 등 미번역분.
+     이들은 단순 치환이 아니라 §8의 키-포맷 리팩터링(조각 concat 사이트 통합)이 필요.
   2. **모바일 터치 UI 결선**(프로토타입 → 실엔진, §9). 현재 `index.html`은 키보드/간이 D-패드만.
   3. **INV_OVER 인벤/도움말 오버레이**가 별도 윈도(`tw`/`sw`)로 그려져 JS UI에 안 뜸(§11, 바텀시트로 분기 필요).
 
@@ -97,7 +104,17 @@ bash rogue-kr-port/build.sh    # -> web/rogue.js + rogue.wasm
 
 ## 10. 다음 마일스톤 (권장 순서)
 1. ✅ **emcc 첫 빌드 + 디버깅 패스**: 완료(§5.1). `build.sh` → `web/rogue.js`/`rogue.wasm`, Node에서 렌더·입력 동작 확인, `web/index.html`로 브라우저 구동 가능.
-2. **메시지 훅 + i18n.c**(패치 #2, §8) → `endmsg()`에서 `web_emit_msg(tr_msg(...))` 호출, 한글 메시지 전면 적용. (지금은 메시지가 화면 상단 라인에 영어로 그려짐.)
+2. ✅(1차) **메시지 훅 + i18n.c**(패치 #2, §8) → `build.sh`가 `endmsg()`를 자동 패치해
+   `web_emit_msg(tr_msg(msgbuf))` 호출. `webcurses/i18n.c`:
+   - 엔진: 조립된 영어 문장을 `TRANSLATIONS[]`(영어 패턴→한국어 템플릿)에 풀-매칭. 패턴의
+     `%s/%d/%c/...`를 캡처해 `$1..$9`로 재삽입, 매칭은 대소문자 무시(endmsg가 첫 글자 대문자화함).
+   - 조사: `$N{을}`/`$N{이}`/`$N{은}`/`$N{과}`/`$N{으로}`/`$N{아}` — 캡처의 받침 유무로 자동 선택
+     (`han_has_batchim`, `으로/로`는 ㄹ받침 처리). 한글이 아니면 무받침 기본.
+   - 폴백: 매칭 없으면 원문 영어 그대로 반환(게임 진행 유지).
+   - 테스트: `gcc -DI18N_TEST webcurses/i18n.c -o t && ./t`.
+   - **남은 작업**: 전투 동사 변형(fight.c `h_names`/`m_names`로 "You scored an excellent hit on
+     the bat" 같은 변형)·인벤/도움말 문구 등은 미번역(영문 폴백). 정확히 하려면 §8의
+     조각-concat → 키-포맷 리팩터링이 필요(`hit()`/`miss()`를 단일 포맷 키로 합치기).
 3. **UI 결선**(9단계) → React 터치 프로토타입을 실엔진에 연결, 터치로 실제 플레이.
 4. **INV_OVER 오버레이 → JS 바텀시트 분기**(§11) → 인벤토리/도움말 메뉴 표시.
 5. 기기 테스트·세이브 영속화(IDBFS `FS.syncfs`)·정적 호스팅 배포.
@@ -105,5 +122,6 @@ bash rogue-kr-port/build.sh    # -> web/rogue.js + rogue.wasm
 ## 11. 알려진 리스크
 - Asyncify로 `getch` 블로킹을 푸는 구조라, 스택 사이즈(`-sASYNCIFY_STACK_SIZE`) 조정이 필요할 수 있음. `-sEMULATE_FUNCTION_POINTER_CASTS=1`과 함께 쓰고 있는데(데몬 디스패치 때문) 둘 다 켠 상태로 빌드/구동은 확인됨. 장기적으로는 데몬/퓨즈 함수 시그니처를 통일해 `EMULATE_FUNCTION_POINTER_CASTS`를 떼는 게 더 가벼움.
 - 인벤토리/도움말은 기본 `inv_type = INV_OVER`라 별도 윈도(`tw`/`sw`)에 그려짐. `newwin`/`subwin`을 분리 malloc해 크래시는 없지만, 이 윈도는 `stdscr`가 아니라 **JS UI로 push되지 않음** → 메뉴가 화면에 안 뜸. `wrefresh(w!=stdscr)` 경로를 JS 오버레이/바텀시트로 분기해야 함(§10.4).
-- 메시지(패치 #2)가 아직 미적용이라 게임 메시지가 화면 0행에 영어로 그려짐 — i18n 단계에서 `web_emit_msg`로 전환.
+- 메시지(패치 #2) 적용됨 — 단 i18n 테이블이 1차라 미번역 메시지는 영문으로 로그에 표시됨(폴백). 표 보강 필요(§10.2).
+- `tr_msg` 패턴 테이블은 **순서 의존**: 더 구체적인 패턴(리터럴/인자 많은 것)을 위에 둬야 일반 패턴에 가려지지 않음. 예: `"you found %d gold pieces"`는 `"you found %s"`보다 먼저.
 - 세이브/스코어 영속화(IDBFS)는 아직 미연결 — 현재 MEMFS라 새로고침 시 세이브 소실.
