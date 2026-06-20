@@ -2,81 +2,365 @@
 <html lang="ko">
 <head>
 <meta charset="utf-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
-<title>운명의 던전 — Rogue (web)</title>
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover" />
+<title>운명의 던전 — Rogue</title>
+<!--
+  index.html — the production mobile touch UI, wired to the live WASM engine.
+  This is the §10-#3 "UI 결선" milestone: the approved feel of
+  prototype/rogue-touch-prototype.jsx, rebuilt dependency-free (no React/Babel/
+  CDN) so it ships as static files, and reading from the REAL engine instead of
+  the prototype's mock reducer:
+    map   ← RogueBridge.getScreen()  (viewport centred on @, torch FOV)
+    log   ← RogueBridge.getMessages()  (Korean, from web_emit_msg)
+    stats ← RogueBridge.getStats()     (parsed off the English status row, §8)
+  input → RogueInput.move / pickup / descend / command / key …
+  Load order: bridge.js (defines RogueBridge) → this script → rogue.js (engine).
+  The raw 80×25 terminal view lives in terminal.html for debugging.
+-->
 <style>
-  :root { --void:#0d0b0a; --floor:#1a1614; --edge:#2e2722; --ember:#e8a04a; --parch:#d9c7a3; }
-  html,body { margin:0; height:100%; background:var(--void); color:var(--parch);
-    font-family:'JetBrains Mono','SF Mono',ui-monospace,Menlo,Consolas,monospace; }
-  #wrap { min-height:100%; display:flex; flex-direction:column; align-items:center; padding:10px; box-sizing:border-box; }
-  #screen { line-height:1.05; white-space:pre; font-size:clamp(8px,2.4vw,15px);
-    background:#000; border:1px solid var(--edge); border-radius:6px; padding:8px; }
-  #screen b { color:var(--ember); }            /* standout cells */
-  #screen i { color:#000; background:var(--parch); font-style:normal; } /* inverse */
-  #hint { margin-top:10px; font-size:12px; color:#8d8069; max-width:80ch; text-align:center; }
-  #keys { margin-top:8px; display:grid; grid-template-columns:repeat(3,52px); gap:5px; }
-  #keys button { font:inherit; font-size:18px; padding:10px 0; background:var(--floor);
-    color:var(--parch); border:1px solid var(--edge); border-radius:8px; }
-  #keys button:active { transform:scale(.93); }
+  :root{
+    --void:#0d0b0a; --floor:#1a1614; --edge:#2e2722; --edge2:#4a3f36;
+    --ember:#e8a04a; --emberDim:#8a6a3a; --blood:#c4543b;
+    --parch:#d9c7a3; --parchDim:#8d8069; --moss:#7a9b6e;
+    --mono:'JetBrains Mono','SF Mono',ui-monospace,Menlo,Consolas,monospace;
+    --kr:'Pretendard',-apple-system,'Apple SD Gothic Neo','Noto Sans KR',sans-serif;
+  }
+  *{ box-sizing:border-box; -webkit-tap-highlight-color:transparent; touch-action:manipulation; }
+  html,body{ margin:0; height:100%; background:var(--void); color:var(--parch); font-family:var(--kr); }
+  #app{ min-height:100vh; min-height:100dvh; display:flex; justify-content:center;
+        background:radial-gradient(120% 80% at 50% 0%, #15110e 0%, var(--void) 70%); }
+  #col{ width:100%; max-width:440px; display:flex; flex-direction:column;
+        padding-bottom:env(safe-area-inset-bottom); }
+
+  /* ── status bar ── */
+  header{ padding:14px 16px 10px; }
+  .title-row{ display:flex; align-items:center; justify-content:space-between; }
+  .title{ font-size:11px; letter-spacing:3px; text-transform:uppercase; color:var(--emberDim); font-weight:700; }
+  .depth{ font-family:var(--mono); font-size:13px; color:var(--parch); background:var(--floor);
+          border:1px solid var(--edge); border-radius:6px; padding:2px 9px; }
+  .hp-row{ margin-top:10px; display:flex; align-items:center; gap:12px; }
+  .hp-wrap{ flex:1; }
+  .hp-track{ height:9px; border-radius:5px; background:var(--edge); overflow:hidden; border:1px solid var(--edge); }
+  .hp-fill{ height:100%; transition:width .2s, background .2s; }
+  .hp-text{ font-family:var(--mono); font-size:11px; color:var(--parchDim); margin-top:3px; }
+  .stat{ text-align:center; min-width:26px; }
+  .stat .k{ font-size:10px; font-weight:700; color:var(--parchDim); }
+  .stat .v{ font-family:var(--mono); font-size:15px; font-weight:600; color:var(--parch); }
+  .stat.accent .k,.stat.accent .v{ color:var(--ember); }
+
+  /* ── map viewport ── */
+  #mapwrap{ padding:8px 12px 4px; display:flex; justify-content:center; position:relative; }
+  #map{ width:100%; max-width:380px; display:grid; gap:1px; background:var(--void);
+        border:1px solid var(--edge); border-radius:8px; padding:6px; }
+  .cell{ aspect-ratio:1/1; display:flex; align-items:center; justify-content:center;
+         background:transparent; border:none; padding:0; cursor:pointer;
+         font-family:var(--mono); font-size:clamp(11px,3.8vw,18px); line-height:1; }
+  .cell.player span{ animation:torch 2.4s ease-in-out infinite; }
+  #boot{ position:absolute; inset:0; display:flex; align-items:center; justify-content:center;
+         color:var(--parchDim); font-family:var(--mono); font-size:13px; pointer-events:none; }
+
+  /* ── message log ── */
+  #log{ padding:8px 16px; min-height:58px; display:flex; flex-direction:column; justify-content:center; gap:2px; }
+  .msg{ font-size:13.5px; display:flex; gap:6px; }
+  .msg .tick{ color:var(--emberDim); }
+  .msg.m0{ color:var(--parch); opacity:1; }
+  .msg.m1{ color:var(--parchDim); opacity:.6; }
+  .msg.m2{ color:var(--parchDim); opacity:.42; }
+
+  /* ── controls ── */
+  #controls{ margin-top:auto; padding:10px 16px 22px; display:flex; gap:14px; align-items:flex-end; }
+  #dpad{ display:grid; grid-template-columns:repeat(3,46px); grid-template-rows:repeat(3,46px); gap:4px; }
+  #dpad button{ border:1px solid var(--edge2); background:var(--floor); color:var(--parch);
+                border-radius:8px; font-size:18px; font-family:var(--mono); transition:transform .05s; }
+  #dpad button.center{ border-color:var(--edge); background:var(--void); color:var(--emberDim); }
+  #actions{ flex:1; display:grid; grid-template-columns:1fr 1fr 1fr; gap:7px; }
+  #actions button{ display:flex; flex-direction:column; align-items:center; gap:3px; padding:9px 0;
+                   background:var(--floor); border:1px solid var(--edge2); border-radius:9px;
+                   color:var(--parch); font-family:var(--kr); transition:transform .05s; }
+  #actions .ico{ font-size:16px; color:var(--ember); line-height:1; }
+  #actions .lbl{ font-size:11.5px; font-weight:600; }
+  .press:active{ transform:scale(.93); }
+
+  /* ── bottom sheet ── */
+  #scrim{ position:fixed; inset:0; background:#000a; display:none; align-items:flex-end;
+          justify-content:center; z-index:20; }
+  #scrim.open{ display:flex; }
+  #sheet{ width:100%; max-width:440px; background:var(--floor); border-top:1px solid var(--edge2);
+          border-radius:16px 16px 0 0; padding:18px 18px calc(26px + env(safe-area-inset-bottom));
+          animation:slideup .22s ease-out; }
+  .grip{ width:38px; height:4px; background:var(--edge2); border-radius:2px; margin:0 auto 14px; }
+  .sheet-h{ font-size:12px; letter-spacing:2px; text-transform:uppercase; color:var(--emberDim);
+            font-weight:700; margin-bottom:12px; }
+  .cmd-grid{ display:grid; grid-template-columns:1fr 1fr 1fr; gap:8px; margin-bottom:16px; }
+  .cmd-grid button{ padding:12px 0; background:var(--void); border:1px solid var(--edge2);
+                    border-radius:9px; color:var(--parch); font-family:var(--kr); font-size:13.5px; }
+  .cmd-grid .key{ font-family:var(--mono); color:var(--emberDim); font-size:11px; }
+  .sub-h{ font-size:11px; color:var(--parchDim); margin:2px 2px 8px; }
+  .letters{ display:grid; grid-template-columns:repeat(7,1fr); gap:5px; }
+  .letters button{ aspect-ratio:1/1; background:var(--void); border:1px solid var(--edge);
+                   border-radius:6px; color:var(--parch); font-family:var(--mono); font-size:13px; }
+  .letters button.special{ color:var(--ember); border-color:var(--edge2); font-family:var(--kr); font-size:11px; }
+  button:active{ filter:brightness(1.25); }
+
+  @keyframes torch{ 0%,100%{ text-shadow:0 0 6px #e8a04acc,0 0 14px #e8a04a66; }
+                    50%{ text-shadow:0 0 4px #e8a04aaa,0 0 10px #e8a04a44; } }
+  @keyframes slideup{ from{ transform:translateY(100%); } to{ transform:translateY(0); } }
+  @media (prefers-reduced-motion: reduce){
+    .cell.player span{ animation:none; text-shadow:0 0 8px #e8a04aaa; }
+    #sheet{ animation:none; }
+  }
 </style>
 </head>
 <body>
-<div id="wrap">
-  <div id="screen">로딩 중… (rogue.wasm)</div>
-  <div id="keys"></div>
-  <div id="hint">
-    이동 h/j/k/l · 대각선 y/u/b/n · 줍기 , · 인벤 i · 계단 &gt; · 검색 s · 쉬기 .<br/>
-    이것은 터미널 렌더러입니다. 모바일 터치 UI는 prototype/rogue-touch-prototype.jsx 를 결선하세요(web/bridge.js 하단 4단계 참고).
+<div id="app">
+  <div id="col">
+    <header>
+      <div class="title-row">
+        <div class="title">운명의 던전</div>
+        <div class="depth" id="depth">–층</div>
+      </div>
+      <div class="hp-row">
+        <div class="hp-wrap">
+          <div class="hp-track"><div class="hp-fill" id="hpfill" style="width:0%"></div></div>
+          <div class="hp-text" id="hptext">HP –/–</div>
+        </div>
+        <div class="stat"><div class="k">Lv</div><div class="v" id="lv">–</div></div>
+        <div class="stat"><div class="k">힘</div><div class="v" id="str">–</div></div>
+        <div class="stat accent"><div class="k">✦</div><div class="v" id="gold">–</div></div>
+      </div>
+    </header>
+
+    <div id="mapwrap">
+      <div id="map"></div>
+      <div id="boot">로딩 중… (rogue.js)</div>
+    </div>
+
+    <div id="log"></div>
+
+    <div id="controls">
+      <div id="dpad"></div>
+      <div id="actions"></div>
+    </div>
   </div>
 </div>
 
-<!-- load order: bridge first (defines window.RogueBridge), then the engine -->
+<div id="scrim">
+  <div id="sheet" onclick="event.stopPropagation()">
+    <div class="grip"></div>
+    <div class="sheet-h">추가 명령</div>
+    <div class="cmd-grid" id="cmds"></div>
+    <div class="sub-h">아이템 선택 / 응답 — 아래 글자로 프롬프트에 답하세요</div>
+    <div class="letters" id="letters"></div>
+  </div>
+</div>
+
 <script src="bridge.js"></script>
 <script>
 (function () {
+  const B = window.RogueBridge, I = window.RogueInput;
   const ROWS = 25, COLS = 80;
-  const el = document.getElementById("screen");
+  const MAP_TOP = 1, MAP_BOT = 23;          // dungeon rows (row 0 = msg, 24 = status)
+  const VW = 23, VH = 15;                    // viewport tiles, centred on @
+
+  /* glyph → colour/weight, mirroring the prototype's torch-lit palette but for
+     the engine's full Rogue glyph set. */
+  function glyphStyle(ch) {
+    if (ch === "@") return ["var(--ember)", 700];
+    if (/[A-Za-z]/.test(ch)) return ["var(--blood)", 600];   // monsters are letters
+    if (ch === "*" || ch === "$") return ["var(--ember)", 600];
+    if (ch === ">" || ch === "<") return ["var(--ember)", 700];
+    if (ch === ":" || ch === "%") return ["var(--moss)", 600];
+    if (ch === "=") return ["var(--ember)", 600];            // ring
+    if ("!?)/[]".includes(ch)) return ["var(--parch)", 600]; // potions/scrolls/gear
+    if (ch === "^") return ["var(--blood)", 600];            // trap
+    if (ch === "#" || ch === "+") return ["var(--edge2)", 500];
+    if (ch === "-" || ch === "|") return ["var(--edge2)", 500];
+    if (ch === ".") return ["#3a322b", 400];
+    return ["var(--parchDim)", 400];
+  }
+
+  /* ── build the map grid (once); cells updated in place each frame ── */
+  const mapEl = document.getElementById("map");
+  mapEl.style.gridTemplateColumns = "repeat(" + VW + ", 1fr)";
+  const cells = [];
+  for (let i = 0; i < VW * VH; i++) {
+    const b = document.createElement("button");
+    b.className = "cell";
+    b.appendChild(document.createElement("span"));
+    mapEl.appendChild(b);
+    cells.push(b);
+  }
+  const bootEl = document.getElementById("boot");
 
   function render() {
-    const scr = window.RogueBridge.getScreen();
-    let html = "";
-    for (let y = 0; y < ROWS; y++) {
-      for (let x = 0; x < COLS; x++) {
-        const cell = scr[y][x];
-        let ch = cell.ch || " ";
-        ch = ch.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-        if (cell.attr & 1) html += "<i>" + ch + "</i>";       // A_STANDOUT
-        else if (ch === "@") html += "<b>" + ch + "</b>";
-        else html += ch;
-      }
-      html += "\n";
-    }
-    el.innerHTML = html;
-  }
-  window.RogueBridge.subscribe(render);
+    const scr = B.getScreen();
+    const p = B.getPlayer();
+    // viewport origin: centre on player, clamp to the dungeon region
+    let cx = p ? p.x : COLS >> 1, cy = p ? p.y : (MAP_TOP + MAP_BOT) >> 1;
+    let ox = Math.min(Math.max(cx - (VW >> 1), 0), COLS - VW);
+    let oy = Math.min(Math.max(cy - (VH >> 1), MAP_TOP), MAP_BOT - VH + 1);
+    let anyInk = false;
 
-  // keyboard -> engine
-  window.addEventListener("keydown", (e) => {
-    if (e.metaKey || e.ctrlKey || e.altKey) return;
-    let code = null;
-    const arrows = { ArrowLeft: "h", ArrowRight: "l", ArrowUp: "k", ArrowDown: "j" };
-    if (arrows[e.key]) code = arrows[e.key];
-    else if (e.key === "Enter") code = 13;
-    else if (e.key === "Escape") code = 27;
-    else if (e.key === "Backspace") code = 8;
-    else if (e.key.length === 1) code = e.key;
-    if (code !== null) { e.preventDefault(); window.RogueBridge.pushKey(code); }
+    for (let vy = 0; vy < VH; vy++) {
+      for (let vx = 0; vx < VW; vx++) {
+        const by = oy + vy, bx = ox + vx;
+        const el = cells[vy * VW + vx];
+        let ch = " ", attr = 0;
+        if (by >= MAP_TOP && by <= MAP_BOT && bx >= 0 && bx < COLS) {
+          const c = scr[by][bx]; ch = c.ch || " "; attr = c.attr;
+        }
+        if (ch !== " ") anyInk = true;
+        const [color, weight] = glyphStyle(ch);
+        const isPlayer = ch === "@";
+        let bright = 1;
+        if (p && !isPlayer) {
+          const d = Math.max(Math.abs(bx - p.x), Math.abs(by - p.y));
+          bright = Math.max(0.16, 1 - d * 0.11);
+        }
+        el.dataset.bx = bx; el.dataset.by = by;
+        el.className = "cell" + (isPlayer ? " player" : "");
+        el.style.color = (attr & 1) ? "var(--ember)" : color;
+        el.style.fontWeight = (attr & 1) ? 700 : weight;
+        el.style.opacity = bright;
+        const span = el.firstChild;
+        if (span.textContent !== ch) span.textContent = ch;
+      }
+    }
+    bootEl.style.display = (anyInk || p) ? "none" : "flex";
+
+    // ── status bar (parsed off the engine's English status row) ──
+    const st = B.getStats();
+    if (st) {
+      document.getElementById("depth").textContent = st.depth + "층";
+      document.getElementById("lv").textContent = st.level;
+      document.getElementById("str").textContent = st.str;
+      document.getElementById("gold").textContent = st.gold;
+      document.getElementById("hptext").textContent = "HP " + Math.max(0, st.hp) + "/" + st.maxhp;
+      const r = st.maxhp ? st.hp / st.maxhp : 0;
+      const fill = document.getElementById("hpfill");
+      fill.style.width = Math.max(0, Math.min(1, r)) * 100 + "%";
+      fill.style.background = r > 0.5 ? "var(--ember)" : r > 0.25 ? "#d8902f" : "var(--blood)";
+    }
+
+    // ── message log (newest first, top 3) ──
+    const msgs = B.getMessages().slice(0, 3);
+    const log = document.getElementById("log");
+    log.innerHTML = msgs.map((m, i) =>
+      '<div class="msg m' + i + '"><span class="tick">▸</span><span></span></div>'
+    ).join("");
+    log.querySelectorAll(".msg span:last-child").forEach((s, i) => { s.textContent = msgs[i]; });
+  }
+  B.subscribe(render);
+
+  const buzz = () => navigator.vibrate && navigator.vibrate(8);
+
+  /* ── tap a tile → step one square toward it (engine resolves walls). While an
+     overlay/prompt is up (no @ on screen), a tap advances it (Space). ── */
+  mapEl.addEventListener("click", (e) => {
+    const cell = e.target.closest(".cell"); if (!cell) return;
+    buzz();
+    const p = B.getPlayer();
+    if (!p) { I.space(); return; }
+    const dx = Math.sign(+cell.dataset.bx - p.x), dy = Math.sign(+cell.dataset.by - p.y);
+    if (dx === 0 && dy === 0) I.rest(); else I.move(dx, dy);
   });
 
-  // minimal on-screen d-pad for touch (full touch UI is the React prototype)
-  const keys = document.getElementById("keys");
-  [["y","y"],["k","k"],["u","u"],["h","h"],[".","."],["l","l"],["b","b"],["j","j"],["n","n"]]
-    .forEach(([label, k]) => {
+  /* ── swipe the map → cardinal move ── */
+  let ts = null;
+  mapEl.addEventListener("touchstart", (e) => { const t = e.touches[0]; ts = { x: t.clientX, y: t.clientY }; }, { passive: true });
+  mapEl.addEventListener("touchend", (e) => {
+    if (!ts) return;
+    const t = e.changedTouches[0], dx = t.clientX - ts.x, dy = t.clientY - ts.y; ts = null;
+    if (Math.max(Math.abs(dx), Math.abs(dy)) < 28) return;   // a tap; handled by click
+    buzz();
+    if (Math.abs(dx) > Math.abs(dy)) I.move(Math.sign(dx), 0); else I.move(0, Math.sign(dy));
+  });
+
+  /* ── D-pad ── */
+  const dpad = document.getElementById("dpad");
+  [["↖",-1,-1],["↑",0,-1],["↗",1,-1],["←",-1,0],["·",0,0],["→",1,0],["↙",-1,1],["↓",0,1],["↘",1,1]]
+    .forEach(([g, dx, dy]) => {
       const b = document.createElement("button");
-      b.textContent = label;
-      b.addEventListener("click", () => window.RogueBridge.pushKey(k));
-      keys.appendChild(b);
+      b.className = "press" + (dx === 0 && dy === 0 ? " center" : "");
+      b.textContent = g;
+      b.setAttribute("aria-label", dx === 0 && dy === 0 ? "기다리기" : "이동 " + g);
+      b.addEventListener("click", () => { buzz(); (dx === 0 && dy === 0) ? I.rest() : I.move(dx, dy); });
+      dpad.appendChild(b);
     });
+
+  /* ── action buttons ── */
+  const actions = [
+    ["✋", "줍기", () => I.pickup()],
+    ["▾",  "계단↓", () => I.descend()],
+    ["▴",  "계단↑", () => I.ascend()],
+    ["🔍", "검색", () => I.search()],
+    ["⏳", "쉬기", () => I.rest()],
+    ["☰",  "더보기", () => openSheet()],
+  ];
+  const actEl = document.getElementById("actions");
+  actions.forEach(([ico, lbl, fn]) => {
+    const b = document.createElement("button");
+    b.className = "press";
+    b.innerHTML = '<span class="ico">' + ico + '</span><span class="lbl">' + lbl + '</span>';
+    b.addEventListener("click", () => { buzz(); fn(); });
+    actEl.appendChild(b);
+  });
+
+  /* ── bottom sheet: command keys + letter keypad for prompt answers ── */
+  const scrim = document.getElementById("scrim");
+  const openSheet = () => { buzz(); scrim.classList.add("open"); };
+  const closeSheet = () => scrim.classList.remove("open");
+  scrim.addEventListener("click", closeSheet);
+
+  // Rogue command keys (command.c). These open engine prompts; answer the
+  // resulting "which item?" with the letter keypad below. Inventory ('i') and
+  // the full item list ('*') render to a side window pending §11/§10-#4, so
+  // their overlay won't show yet — the prompt + log still work.
+  const cmds = [
+    ["q","마시기"],["r","읽기"],["e","먹기"],
+    ["w","장착"],["W","입기"],["t","던지기"],
+    ["T","갑옷벗기"],["i","소지품"],["?","도움말"],
+  ];
+  const cmdEl = document.getElementById("cmds");
+  cmds.forEach(([k, lbl]) => {
+    const b = document.createElement("button");
+    b.innerHTML = lbl + ' <span class="key">' + k + '</span>';
+    b.addEventListener("click", () => { buzz(); I.command(k); closeSheet(); });
+    cmdEl.appendChild(b);
+  });
+
+  const letters = document.getElementById("letters");
+  // a–z, then the special prompt answers
+  for (let i = 0; i < 26; i++) {
+    const ch = String.fromCharCode(97 + i);
+    const b = document.createElement("button");
+    b.textContent = ch;
+    b.addEventListener("click", () => { buzz(); I.key(ch); });
+    letters.appendChild(b);
+  }
+  [["*","목록", () => I.key("*")], ["⏎","확인", () => I.enter()],
+   ["␣","다음", () => I.space()], ["esc","취소", () => I.escape()]]
+    .forEach(([t, lbl, fn]) => {
+      const b = document.createElement("button");
+      b.className = "special";
+      b.innerHTML = t + "<br>" + lbl;
+      b.addEventListener("click", () => { buzz(); fn(); });
+      letters.appendChild(b);
+    });
+
+  /* ── physical keyboard (desktop testing) ── */
+  const MOVE = { ArrowLeft:[-1,0], ArrowRight:[1,0], ArrowUp:[0,-1], ArrowDown:[0,1],
+                 h:[-1,0], l:[1,0], k:[0,-1], j:[0,1], y:[-1,-1], u:[1,-1], b:[-1,1], n:[1,1] };
+  window.addEventListener("keydown", (e) => {
+    if (e.metaKey || e.ctrlKey || e.altKey) return;
+    if (MOVE[e.key]) { e.preventDefault(); I.move(MOVE[e.key][0], MOVE[e.key][1]); return; }
+    if (e.key === "Enter") { e.preventDefault(); I.enter(); return; }
+    if (e.key === "Escape") { e.preventDefault(); I.escape(); return; }
+    if (e.key === "Backspace") { e.preventDefault(); I.key(8); return; }
+    if (e.key.length === 1) { e.preventDefault(); I.key(e.key); }    // pass commands/letters through
+  });
+
+  render();
 })();
 </script>
 <script src="rogue.js"></script>

@@ -47,6 +47,48 @@
     subscribe(cb) { listeners.add(cb); return () => listeners.delete(cb); },
     getScreen() { return screen; },
     getMessages() { return messages; },
+
+    /* ---- derived reads the touch UI uses (no engine changes needed) ---- */
+
+    /* Player glyph position on the dungeon rows (1..ROWS-2), or null if the
+     * map isn't drawn yet (boot, or a full-screen overlay like death/help). */
+    getPlayer() {
+      for (let y = 1; y < ROWS - 1; y++)
+        for (let x = 0; x < COLS; x++)
+          if (screen[y][x].ch === "@") return { x, y };
+      return null;
+    },
+
+    /* Rogue's status line stays English/numeric on purpose (§8): instead of a
+     * C hook we parse it straight off the buffer. Returns null until it shows.
+     *   "Level: 1  Gold: 0  Hp: 12(12)  Str: 16(16)  Arm: 4  Exp: 1/0  ..."
+     * Note Rogue's "Level" is the DUNGEON depth; the character level is Exp's
+     * first field. The trailing word, if any, is the hunger state. */
+    getStats() {
+      for (let y = ROWS - 1; y >= 0; y--) {
+        const line = screen[y].map((c) => c.ch).join("");
+        if (!/Hp:\s*\d/.test(line)) continue;
+        const num = (re) => { const m = line.match(re); return m ? m.slice(1).map(Number) : null; };
+        const depth = num(/Level:\s*(\d+)/);
+        const gold = num(/Gold:\s*(\d+)/);
+        const hp = num(/Hp:\s*(\d+)\((\d+)\)/);
+        const str = num(/Str:\s*(\d+)\((\d+)\)/);
+        const arm = num(/Arm:\s*(-?\d+)/);
+        const exp = num(/Exp:\s*(\d+)\/(\d+)/);
+        const hunger = (line.match(/Exp:\s*\d+\/\d+\s+([A-Za-z]+)/) || [])[1] || "";
+        if (!hp) return null;
+        return {
+          depth: depth ? depth[0] : 1,
+          gold: gold ? gold[0] : 0,
+          hp: hp[0], maxhp: hp[1],
+          str: str ? str[0] : 0, maxstr: str ? str[1] : 0,
+          arm: arm ? arm[0] : 0,
+          level: exp ? exp[0] : 1, exp: exp ? exp[1] : 0,
+          hunger,
+        };
+      }
+      return null;
+    },
   };
 
   /* Semantic helpers the touch UI uses instead of raw key codes. */
@@ -72,32 +114,40 @@
     pickup()    { window.RogueBridge.pushKey(","); },
     inventory() { window.RogueBridge.pushKey("i"); },
     descend()   { window.RogueBridge.pushKey(">"); },
+    ascend()    { window.RogueBridge.pushKey("<"); },
     search()    { window.RogueBridge.pushKey("s"); },
     rest()      { window.RogueBridge.pushKey("."); },
     command(c)  { window.RogueBridge.pushKey(c); }, // q,r,w,W,e,t,? from drawer
+    // answer engine prompts (item letters, --More--, y/n, name entry)
+    key(c)      { window.RogueBridge.pushKey(c); },
+    enter()     { window.RogueBridge.pushKey(13); },
+    escape()    { window.RogueBridge.pushKey(27); },
+    space()     { window.RogueBridge.pushKey(" "); },
   };
 })();
 
 /* ---------------------------------------------------------------------------
- * Wiring into the prototype's React component (rogue-touch-prototype.jsx):
+ * UI 결선 — DONE. The live touch UI is web/index.html (dependency-free vanilla
+ * JS rebuild of prototype/rogue-touch-prototype.jsx, wired to this bridge):
  *
- *   1. Drop the mock useReducer. Instead:
- *        const [, force] = useReducer(x => x + 1, 0);
- *        useEffect(() => RogueBridge.subscribe(force), []);
- *      and render the map from RogueBridge.getScreen() (rows ~1..22 = dungeon,
- *      glyph color via the existing glyphStyle()), and the log from
- *      RogueBridge.getMessages(). Player @ position is read off the screen
- *      buffer, so torch-FOV brightness still works unchanged.
+ *   1. Map:   render a viewport centred on @ from RogueBridge.getScreen()
+ *             (dungeon rows 1..23), torch-FOV brightness by distance to
+ *             RogueBridge.getPlayer(), glyph colour via glyphStyle().
+ *             Log: RogueBridge.getMessages() (Korean, from web_emit_msg).
  *
- *   2. Replace dispatch(...) calls in the controls:
- *        D-pad      -> RogueInput.move(dx, dy)
- *        tap tile   -> RogueInput.tap(x, y, px, py)
- *        줍기/인벤/계단/검색/쉬기 -> RogueInput.pickup()/inventory()/...
- *        더보기 drawer items     -> RogueInput.command('q'|'r'|'w'|...)
+ *   2. Input: D-pad/tap/swipe -> RogueInput.move(dx,dy); action buttons ->
+ *             pickup()/descend()/ascend()/search()/rest(); the 더보기 sheet ->
+ *             command('q'|'r'|'w'|...) plus an a–z keypad + key()/enter()/
+ *             escape()/space() to answer engine prompts.
  *
- *   3. Status bar (HP/Lv/Gold/Str/depth): export those from C via a tiny
- *      EM_ASM hook in Rogue's status() (io.c) -> RogueBridge.stats({...}),
- *      so we keep our JS status bar and skip translating Rogue's status line.
+ *   3. Status bar (depth/HP/Lv/Str/Gold): RogueBridge.getStats() parses Rogue's
+ *             English status row straight off the buffer — no C hook or rebuild
+ *             needed (the status line is intentionally left untranslated, §8).
  *
- *   4. Load order in index.html:  bridge.js  ->  rogue.js (emscripten) .
+ *   4. Load order in index.html:  bridge.js  ->  this UI  ->  rogue.js .
+ *
+ * Still pending (§10-#4 / §11): inventory & full item-list overlays render to a
+ * side window (INV_OVER) that isn't pushed to stdscr, so 'i'/'*' don't display
+ * yet — the prompts they raise still surface in the Korean log and are
+ * answerable from the letter keypad.
  * ------------------------------------------------------------------------- */
