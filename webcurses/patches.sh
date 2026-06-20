@@ -11,12 +11,25 @@ SRC="${1:?usage: patches.sh <rogue-src-dir>}"
 # At the end of endmsg(), msgbuf holds the fully assembled English line. Route
 # it through tr_msg() (EN->KO, webcurses/i18n.c) into web_emit_msg() instead of
 # drawing it on the curses top line. clrtoeol()/refresh() right after still run.
+#
+# We append `move(0, 0)` to the replacement on purpose. The original
+# `mvaddstr(0, 0, msgbuf)` had a side effect endmsg relied on: it parked the
+# cursor at column 0 of row 0, so the following clrtoeol() wiped the WHOLE top
+# line. Drop that and clrtoeol() instead clears from wherever the cursor last
+# sat — after endmsg's own `--More--` prompt the cursor is past it, so
+# `--More--` is left as residue on row 0. The touch bridge's auto-`--More--`
+# advancer (web/bridge.js RogueBridge.refresh) is edge-triggered on row-0 text;
+# stale `--More--` latches its `moreActive` flag true forever, so the NEXT real
+# `--More--` pause never gets its synthetic space and wait_for(' ') blocks. That
+# is the equip/wield hang: get_item's loop emits "is not a valid item" then
+# re-prompts back-to-back, hitting that wedged pager. Restoring move(0,0) keeps
+# row 0 cleared each message so the edge re-arms.
 IO="$SRC/io.c"
 if ! grep -q 'web_emit_msg(tr_msg' "$IO"; then
   perl -0pi -e 's/#include "rogue\.h"/#include "rogue.h"\nextern const char *tr_msg(const char *);\nextern void web_emit_msg(const char *);/' "$IO"
-  perl -0pi -e 's/\Qmvaddstr(0, 0, msgbuf);\E/web_emit_msg(tr_msg(msgbuf));/' "$IO"
+  perl -0pi -e 's/\Qmvaddstr(0, 0, msgbuf);\E/web_emit_msg(tr_msg(msgbuf)); move(0, 0);/' "$IO"
   grep -q 'web_emit_msg(tr_msg' "$IO" || { echo "patch #2 FAILED ($IO)" >&2; exit 1; }
-  echo "patched $IO (endmsg -> web_emit_msg(tr_msg(...)))"
+  echo "patched $IO (endmsg -> web_emit_msg(tr_msg(...)) + clear row 0)"
 fi
 
 # --- Patch #4: item names (Korean) ------------------------------------------

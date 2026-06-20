@@ -58,6 +58,12 @@ jobs:
       - name: Verify save persistence flow (headless)
         run: node web/persist-test.js
 
+      # Regression for the equip/wield prompt hang: replays get_item over the
+      # patched endmsg against the real bridge.js (no wasm needed) and asserts
+      # the auto-`--More--` advancer recovers from invalid input.
+      - name: Verify item-prompt --More-- recovery (headless)
+        run: node web/more-prompt-test.js
+
       # Assemble the publishable site: runtime files only (drop the Node dev
       # tests, *.o, and the gitignored engine tree). .nojekyll keeps Pages from
       # munging emscripten output.
