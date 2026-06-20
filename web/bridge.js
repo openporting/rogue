@@ -18,6 +18,7 @@
   let messages = [];
   let overlay = null;          // current overlay sheet (array of text lines) or null
   let overlayBuf = null;       // accumulator between overlayBegin/overlayEnd
+  let moreActive = false;      // is a "--More--" pager currently on row 0?
   const keyQueue = [];
   const listeners = new Set();
   const notify = () => listeners.forEach((cb) => cb());
@@ -31,6 +32,17 @@
     refresh() {
       // a stdscr commit means the game redrew the map -> any overlay is done.
       if (overlay) overlay = null;
+      // Auto-advance the "--More--" message pager. Rogue blocks on wait_for(' ')
+      // whenever a turn emits 2+ messages, so the player can read the earlier one
+      // before it's overwritten (io.c endmsg). There's no spacebar on mobile, and
+      // our Korean log already keeps the full history, so the pause is pointless —
+      // feed the space ourselves. The marker lives only on row 0 (translated to
+      // "--계속--"); rising-edge so each --More-- gets exactly one space. Each
+      // pager step is preceded by a cleared-row-0 refresh, so the edge re-arms.
+      const row0 = screen[0].map((c) => c.ch).join("");
+      const hasMore = row0.indexOf("계속") !== -1 || row0.indexOf("More") !== -1;
+      if (hasMore && !moreActive) keyQueue.push(32);
+      moreActive = hasMore;
       notify();
     },
     clearScreen() {

@@ -86,13 +86,20 @@ rogue-kr-port/
   설정·마법탐지 등 **stdscr이 아닌 모든 윈도**(`hw`, INV_OVER의 `tw`)를 `web_curses.c`의
   `wrefresh(w!=stdscr)`가 텍스트 오버레이로 JS에 push. `bridge.js`의 `overlayBegin/Line/End`가
   `RogueBridge.getOverlay()`를 만들고, `web/index.html`이 별도 바텀시트(`#ovl-scrim`, 모노스페이스
-  `<pre>`)로 렌더. 엔진은 페이지마다 키 대기 → "계속 ␣" 버튼이 space 전송, 다음 stdscr
+  `<pre>`)로 렌더. 엔진은 페이지마다 키 대기 → "계속 ▸" 버튼이 space 전송, 다음 stdscr
   `refresh()`가 오버레이 자동 해제. **핵심 수정**: `subwin()`이 부모 윈도를 진짜로 aliasing하도록
   바꿔(우리 윈도는 이미 풀사이즈) INV_OVER가 복사한 아이템 줄 + 프롬프트가 실제로 그려지는 윈도(tw)에
   들어가게 함. **emcc 6.0.0 풀빌드 + Node로 인게임 검증**: `i`(INV_OVER) → 시작 소지품이 한글로 정확히
   렌더(`a) 음식`, `b) +1 사슬 미늘 갑옷 [방어 4] (착용 중)`, `c) +1,+1 철퇴 (장착 중)`, `d) +1,+0 단궁`,
   `e) +0,+0 화살 27개`, `--계속하려면 스페이스--`); `?`+`*`(hw 경로) → 2단 한글 도움말 렌더. i18n 회귀
   테스트(`node web/headless-test.js`)도 PASS. (네이티브 데모 `gcc -DWEBCURSES_DEMO`로도 subwin alias 확인.)
+- ✅ **`--More--` 메시지 페이저 자동 진행 (모바일) — 완료**: 한 턴에 메시지가 2개 이상이면 엔진이
+  `io.c endmsg()`에서 `wait_for(' ')`로 멈춰 이전 메시지를 읽게 함. **모바일엔 물리 스페이스가 없고**
+  우리 한글 로그는 50개를 보존하므로 이 멈춤이 불필요 → `bridge.js`의 `refresh()`가 stdscr 0행에서
+  `--More--`(번역 시 `--계속--`) 마커를 **상승엣지**로 감지해 스페이스를 자동 주입(각 페이저 단계 앞에는
+  0행을 비우는 refresh가 있어 엣지 재무장). 오버레이의 "계속 ▸"(인벤/도움말)와는 별개 — 오버레이는
+  비-stdscr 윈도라 0행 감지에 안 걸리고 사용자가 직접 닫음. 검증: 실제 bridge 코드로 상승엣지
+  단위테스트(연쇄 `--More--`·중복프레임 dedup·ASCII 폴백) PASS + wasm 수백 턴 구동 시 입력 데드락 없음.
 - ❌ **아직 안 된 것**:
   1. **세이브/스코어 영속화**(IDBFS `FS.syncfs`) 미연결 — 현재 MEMFS라 새로고침 시 세이브 소실.
 
