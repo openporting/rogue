@@ -22,6 +22,11 @@ globalThis.RogueBridge = {
   drawCell() {},
   refresh() {},
   clearScreen() {},
+  // overlay seam (inventory/help/lists) — no-ops here; just keep them callable
+  // so an 'i'/'?'/'*' key in a custom script doesn't crash the stub.
+  overlayBegin() {},
+  overlayLine(s) { console.log("[OVL] " + s); },
+  overlayEnd() {},
   msg(korean) {
     captured.push(korean);
     console.log("[MSG] " + korean);
