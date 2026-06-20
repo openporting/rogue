@@ -14,7 +14,8 @@
     log   ← RogueBridge.getMessages()  (Korean, from web_emit_msg)
     stats ← RogueBridge.getStats()     (parsed off the English status row, §8)
   input → RogueInput.move / pickup / descend / command / key …
-  Load order: bridge.js (defines RogueBridge) → this script → rogue.js (engine).
+  Load order: bridge.js (RogueBridge) → audio.js (RogueAudio) → persist.js
+              (IDBFS save, defines Module) → this script → rogue.js (engine).
   The raw 80×25 terminal view lives in terminal.html for debugging.
 -->
 <style>
@@ -187,6 +188,7 @@
 
 <script src="bridge.js"></script>
 <script src="audio.js"></script>
+<script src="persist.js"></script>
 <script>
 (function () {
   const B = window.RogueBridge, I = window.RogueInput;

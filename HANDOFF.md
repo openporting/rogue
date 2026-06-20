@@ -50,7 +50,11 @@ rogue-kr-port/
    │                              msg()가 RogueAudio.onMessage()로 효과음 트리거.
    ├─ audio.js                 ← RogueAudio: Web Audio 합성 SFX 14종 + 생성형 던전 BGM
    │                              (§10-#5). 에셋·CDN 0, localStorage 설정 영속화.
-   └─ headless-test.js         ← 브라우저 없이 Node로 i18n 훅 검증(한글 메시지 PASS).
+   ├─ persist.js               ← IDBFS 세이브 영속화(§10-#6). Module.preRun에서 /save에
+   │                              IDBFS 마운트(=$HOME) + FS.syncfs(true) 로드(있으면 argv로
+   │                              자동 이어하기) + onExit에서 FS.syncfs(false) 저장.
+   ├─ headless-test.js         ← 브라우저 없이 Node로 i18n 훅 검증(한글 메시지 PASS).
+   └─ persist-test.js          ← persist.js IDBFS 흐름 헤드리스 검증(Emscripten FS 목, PASS).
 ```
 
 ## 5. 현재 상태 (정확히)
@@ -117,8 +121,22 @@ rogue-kr-port/
   - **설정 영속화**: sfx/bgm 볼륨·뮤트를 `localStorage`(`rogue.audio`)에 저장. 헤더에 🔈 토글(뮤트 시 🔇).
   - **검증**: `node --check` + WebAudio/DOM 목으로 `audio.js` 헤드리스 스모크(unlock→음악 시작,
     뮤트→정지·영속화, 볼륨 설정·영속화) PASS. i18n 회귀(`headless-test.js`)는 자체 스텁이라 무영향.
-- ❌ **아직 안 된 것**:
-  1. **세이브/스코어 영속화**(IDBFS `FS.syncfs`) 미연결 — 현재 MEMFS라 새로고침 시 세이브 소실.
+- ✅ **세이브 영속화 (IDBFS `FS.syncfs`) (§10-#6) — 완료**: 엔진(WASM) 무수정, 전부 `web/` 계층
+  (`web/persist.js` 신규 + `build.sh`에 `-lidbfs.js`·런타임 심볼 export). 원본은 `<home>/rogue.save`에
+  세이브하고(`main.c`: `file_name = md_gethomedir()+"rogue.save"`, emscripten에선 `$HOME`로 귀결), 스코어
+  파일은 컴파일 타임 비활성(`webcurses/config.h`에 `SCOREFILE` 미정의 → `scoreboard=NULL`)이라 **유일한
+  영속 대상은 `rogue.save`**.
+  - **마운트/로드**: `Module.preRun`에서 `ENV.HOME=/save` 설정 후 `/save`에 IDBFS 마운트, `FS.syncfs(true)`로
+    IndexedDB→MEMFS 적재(런 디펜던시로 startup 게이트). 세이브가 있으면 `Module.arguments`에 경로를 넣어
+    엔진이 `restore()`로 **자동 이어하기**(`main.c`: `argc==2`). `restore()`는 세이브를 `unlink`(세이브 스컴
+    방지) → 재개된 게임이 사망/종료(`exit()`)할 때 삭제가 함께 flush돼 다음엔 새 게임.
+  - **저장**: 원작은 `S`(저장)·사망 모두 `exit()`로 끝나고 그 직전에만 `rogue.save`가 쓰이/지워지므로
+    `Module.onExit`에서 `FS.syncfs(false)`로 MEMFS→IndexedDB flush(재진입 가드 + 탭 숨김/`pagehide` 세이프티
+    넷). 종료 후 "새로고침하면 이어하기" 안내 배너. `RoguePersist.flush()/reset()` 콘솔/복구용 핸들.
+  - **검증**: `node web/persist-test.js`(Emscripten FS/IDBFS/ENV/런디펜던시 목으로 부팅 로드·argv 재개·exit
+    flush·reset 전 항목 PASS) + `node --check`. 남은 것: 실기기/브라우저에서 풀빌드 결합 시 `md_gethomedir`가
+    `$HOME`로 귀결되는지 최종 확인(아니면 `web_curses.c`에 `getpwuid` 셰임으로 `pw_dir=/save` 고정).
+- ❌ **아직 안 된 것**: (핵심 마일스톤 §10 전부 완료) 실기기 테스트 + 정적 호스팅 배포만 남음.
 
 ### 5.1 emcc 빌드에서 실제로 필요했던 것 (이번 핸드오프에서 해결)
 설계상 "첫 컴파일에서 확장" 전제대로, 다음을 추가/수정함:
@@ -142,7 +160,7 @@ bash rogue-kr-port/build.sh    # -> web/rogue.js + rogue.wasm
 node web/headless-test.js      # '>'/'<'/'Q' -> 한글 메시지 PASS
 ```
 검증 환경: **emscripten 6.0.0**으로 풀빌드 + Node 구동 확인됨(정적 메시지 한글 방출 PASS).
-주요 플래그: `-I webcurses`(우리 curses.h 우선), `-sASYNCIFY`(blocking getch→`emscripten_sleep`), `-sFORCE_FILESYSTEM`(세이브), `-sALLOW_MEMORY_GROWTH`.
+주요 플래그: `-I webcurses`(우리 curses.h 우선), `-sASYNCIFY`(blocking getch→`emscripten_sleep`), `-sFORCE_FILESYSTEM` + `-lidbfs.js`(세이브 영속화, §10-#6), `-sALLOW_MEMORY_GROWTH`. 런타임 심볼 `FS/IDBFS/ENV/addRunDependency/removeRunDependency`를 `EXPORTED_RUNTIME_METHODS`로 내보내 `web/persist.js`가 마운트·동기화에 사용.
 
 ## 7. 원본 패치 (전부 `webcurses/patches.sh`에서 멱등 적용; build.sh가 호출)
 1. **include**: 패치 불필요 — `-I webcurses`로 `#include <curses.h>`가 자동으로 셰임에 연결.
@@ -153,7 +171,9 @@ node web/headless-test.js      # '>'/'<'/'Q' -> 한글 메시지 PASS
    호출해 결과를 `prbuf`에 되돌려 주는 얇은 래퍼로 감쌈. 인벤토리·메시지의 아이템명이 한글로.
 5. **화면 텍스트**: 패치 아님 — `web_curses.c`의 `waddstr`가 `tr_screen()`을 거쳐 도움말/죽음 화면/프롬프트를 한글화.
 
-추가: 세이브/스코어 파일은 `FORCE_FILESYSTEM` + IDBFS 마운트 후 `FS.syncfs()`로 영속화.
+추가(완료, §10-#6): 세이브는 패치 아님 — `FORCE_FILESYSTEM` + `-lidbfs.js` 위에서 `web/persist.js`가
+`/save`(=`$HOME`)에 IDBFS를 마운트하고 부팅 `FS.syncfs(true)`/종료 `FS.syncfs(false)`로 영속화. 스코어
+파일은 `SCOREFILE` 미정의로 비활성이라 영속화 대상 아님.
 
 ## 8. 한글화(i18n) 전략 — 코드로 입증된 난점
 영어 원본은 메시지를 **조각으로 이어 붙임**: `msg("there is ") … msg(" to pick up")`, `msg("I see ")`. 한국어는 어순이 달라 **단순 치환이 깨짐**. 따라서:
@@ -181,7 +201,9 @@ node web/headless-test.js      # '>'/'<'/'Q' -> 한글 메시지 PASS
 5. ✅ **음향(SFX + BGM)**(§12) → `web/audio.js`의 `RogueAudio`: 합성 효과음 14종(메시지 패턴 매칭) +
    생성형 던전 BGM(깊이별 리튠·하강 큐). 첫 제스처 게이트, 🔈 토글, `localStorage` 설정 영속화.
    엔진 리빌드 0, 에셋·CDN 0. (§5 참고.) 남은 것: 실기기에서 풀빌드 결합 청취 확인 + BEL 셰임(§12.3, 선택).
-6. 기기 테스트·세이브 영속화(IDBFS `FS.syncfs`)·정적 호스팅 배포.
+6. ✅ **세이브 영속화(IDBFS `FS.syncfs`)**(§5) → `web/persist.js`: `/save`에 IDBFS 마운트(=`$HOME`),
+   부팅 시 `syncfs(true)` 로드 + 세이브 있으면 argv로 자동 이어하기, `onExit`에서 `syncfs(false)` 저장.
+   엔진 리빌드 0(빌드 플래그 `-lidbfs.js` + 런타임 심볼 export만). 남은 것: 기기 테스트·정적 호스팅 배포.
 
 ## 11. 알려진 리스크
 - Asyncify로 `getch` 블로킹을 푸는 구조라, 스택 사이즈(`-sASYNCIFY_STACK_SIZE`) 조정이 필요할 수 있음. `-sEMULATE_FUNCTION_POINTER_CASTS=1`과 함께 쓰고 있는데(데몬 디스패치 때문) 둘 다 켠 상태로 빌드/구동은 확인됨. 장기적으로는 데몬/퓨즈 함수 시그니처를 통일해 `EMULATE_FUNCTION_POINTER_CASTS`를 떼는 게 더 가벼움.
@@ -189,7 +211,9 @@ node web/headless-test.js      # '>'/'<'/'Q' -> 한글 메시지 PASS
   `wrefresh(w!=stdscr)`를 오버레이 바텀시트로 분기. `subwin`을 부모 alias로 바꿔 INV_OVER 복사가
   실제 그려지는 윈도에 들어가게 함(`sw`는 `tw`의 서브윈도이므로 alias가 정상; `delwin`은 `tw`만 함 → 안전).
 - 메시지(패치 #2)가 아직 미적용이라 게임 메시지가 화면 0행에 영어로 그려짐 — i18n 단계에서 `web_emit_msg`로 전환.
-- 세이브/스코어 영속화(IDBFS)는 아직 미연결 — 현재 MEMFS라 새로고침 시 세이브 소실.
+- ~~세이브/스코어 영속화(IDBFS)는 아직 미연결~~ → **해결(§5, §10-#6)**: `web/persist.js`가 `/save`에
+  IDBFS 마운트 + 부팅 `syncfs(true)`/종료 `syncfs(false)`. 잔여 가정: `md_gethomedir`가 `$HOME(=/save)`로
+  귀결(emscripten에서 그렇게 동작). 실기기에서 세이브가 `/save` 밖에 떨어지면 셰임에 `getpwuid`로 홈 고정.
 
 ## 12. 음향 설계 (SFX + BGM) — 마일스톤 §10-#5
 **원작은 무음.** Rogue 5.4.4의 유일한 소리는 터미널 벨(`\007`)뿐이라, 음향은 전부 **웹 계층에서

@@ -44,7 +44,8 @@ emcc \
   -sEMULATE_FUNCTION_POINTER_CASTS=1 \
   -sALLOW_MEMORY_GROWTH=1 \
   -sFORCE_FILESYSTEM=1 \
-  -sEXPORTED_RUNTIME_METHODS=ccall,cwrap,UTF8ToString \
+  -lidbfs.js \
+  -sEXPORTED_RUNTIME_METHODS=ccall,cwrap,UTF8ToString,FS,IDBFS,ENV,addRunDependency,removeRunDependency \
   -sEXIT_RUNTIME=0 \
   -o $OUT/rogue.js
 
@@ -72,6 +73,11 @@ echo "built -> $OUT/rogue.js (+ rogue.wasm)"
 #     bridge's md_readchar() (web_curses.c) wins. Also stub md_*tty/md_nosig
 #     terminal calls in mdport.c to no-ops for the browser.
 #
-# Save/score files: Rogue writes to disk; under FORCE_FILESYSTEM mount IDBFS at
-# the save dir and FS.syncfs() on save/quit to persist across sessions.
+# Save persistence — DONE (web/persist.js). FORCE_FILESYSTEM + -lidbfs.js give
+# us IDBFS; persist.js mounts it at /save (= $HOME, so Rogue's <HOME>/rogue.save
+# lands there), FS.syncfs(true) on boot (and resumes by passing the save as
+# argv[1] -> restore()), and FS.syncfs(false) on exit (save 'S'/death) via
+# Module.onExit. The exported FS/IDBFS/ENV/addRunDependency symbols above let it
+# drive the mount/sync. The score file is compile-time off (no SCOREFILE in
+# webcurses/config.h), so rogue.save is the only persisted artifact.
 # =============================================================================
