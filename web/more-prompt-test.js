@@ -1,10 +1,11 @@
-/* more-prompt-test.js — headless regression test for the equip/wield hang.
+/* more-prompt-test.js — headless regression test for the --More-- pager
+ * deadlock (equip/wield prompt hang AND the after-first-hit combat freeze).
  *
  * No browser, no wasm: it loads the REAL web/bridge.js and replays the exact
- * curses calls Rogue makes for an item-selection prompt — pack.c get_item()
- * looping over io.c endmsg() (with web_curses.c's stdscr shadow-diff in
- * between) — to prove the touch bridge's auto-`--More--` advancer recovers
- * from invalid input instead of deadlocking.
+ * curses calls Rogue makes — pack.c get_item() looping over io.c endmsg(), and
+ * a combat turn chaining messages through endmsg() (with web_curses.c's stdscr
+ * shadow-diff in between) — to prove the touch bridge's auto-`--More--`
+ * advancer keeps recovering instead of latching itself into a deadlock.
  *
  *   run:  node web/more-prompt-test.js
  *
@@ -102,6 +103,9 @@ function makeEngine(B, fixed) {
     pushUser: (codes) => codes.forEach((c) => pending.push(() => B.pushKey(c))),
     priorMessage: (s) => msg(s),                           // leaves mpos>0, like a real turn
     getItem,
+    // A combat turn chains messages straight through endmsg (no msg("") between),
+    // so each extra line is a --More-- pager the UI must auto-advance unattended.
+    combatTurn: () => { msg("you hit the kobold"); msg("the kobold hits you"); },
   };
 }
 
@@ -141,10 +145,34 @@ for (const c of CASES) {
   check(`${c.label} -> wields 'a', no hang`, result === "a" && !hang);
 }
 
-console.log("\n=== control (pre-fix endmsg): the bug must still reproduce ===");
+// Same root cause, no prompt involved: fighting a monster chains messages, so
+// every turn after the first raises a --More-- pager. With the bug the first
+// turn's stale --More-- latches moreActive and turn 2 freezes ("can't move
+// after the first hit"); the fix must let combat run indefinitely.
+function runCombat(fixed, turns) {
+  delete require.cache[require.resolve(path.join(__dirname, "bridge.js"))];
+  global.window = {};
+  require(path.join(__dirname, "bridge.js"));
+  const eng = makeEngine(global.window.RogueBridge, fixed);
+  let survived = 0;
+  for (let i = 0; i < turns && !eng.isHang(); i++) { eng.combatTurn(); if (!eng.isHang()) survived++; }
+  return { survived, hang: eng.isHang() };
+}
+
+console.log("\n=== fixed build (shipping): combat must never freeze ===");
+{
+  const { survived, hang } = runCombat(true, 5);
+  check("5 attack turns of chained messages, no --More-- freeze", survived === 5 && !hang);
+}
+
+console.log("\n=== control (pre-fix endmsg): the bugs must still reproduce ===");
 {
   const { hang } = runScenario(false, [108, 97]);          // invalid key first -> wedged pager
   check("stray move before valid item hangs without the fix", hang === true);
+}
+{
+  const { survived, hang } = runCombat(false, 5);          // freezes after the first hit
+  check("combat freezes after the first turn without the fix", hang === true && survived < 5);
 }
 
 if (failures === 0) {
