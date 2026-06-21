@@ -449,6 +449,7 @@ static const struct frame_fix FIX[] = {
     { "you now have ",   "",  "이제 {N을} 가지고 있다",  D_NONE },
     { "you found ",      "",  "{N을} 발견했다",          D_NONE },
     { "moved onto ",     "",  "{N0} 위로 이동했다",      D_NONE },
+    { "you moved onto ", "",  "{N0} 위로 이동했다",      D_NONE },
     { "wielding ",       "",  "{N을} 들었다",            D_NONE },
     { "wearing ",        "",  "{N을} 착용했다",          D_NONE },
     /* non-terse equip/unequip: the engine prepends "you are now " / "you used
@@ -686,6 +687,9 @@ static const struct tr_entry TABLE[] = {
     /* pack / inventory */
     { "you aren't carrying anything",               "아무것도 들고 있지 않다" },
     { "nothing here",                               "여기엔 아무것도 없다" },
+    { "there is nothing here to pick up",           "여기엔 주울 것이 없다" },
+    { "no room",                                    "자리가 없다" },
+    { "there's no room in your pack",               "배낭에 빈 자리가 없다" },
     { "you are too weak to use it",                 "너무 약해서 그것을 쓸 수 없다" },
     { "you can't.  it appears to be cursed",        "그럴 수 없다. 저주받은 것 같다" },
     { "you can't.  you're floating off the ground!","그럴 수 없다. 당신은 땅에서 떠 있다!" },
@@ -924,6 +928,9 @@ int main(void)
         { "you now have 단검 (a)",            "이제 단검을 가지고 있다" },
         { "you found 5 gold pieces",          "금화 5닢을 발견했다" },
         { "moved onto 철퇴",                  "철퇴 위로 이동했다" },
+        { "you moved onto 철퇴",              "철퇴 위로 이동했다" },
+        { "there is nothing here to pick up", "여기엔 주울 것이 없다" },
+        { "there's no room in your pack",     "배낭에 빈 자리가 없다" },
         { "you are now wielding +1,+0 단궁 (d)",   "+1,+0 단궁을 들었다" },
         { "you are now wearing +1 사슬 미늘 갑옷 [방어 4]", "+1 사슬 미늘 갑옷 [방어 4]를 착용했다" },
         { "you used to be wearing b) +1 사슬 미늘 갑옷 [방어 4]", "+1 사슬 미늘 갑옷 [방어 4]를 벗었다" },
