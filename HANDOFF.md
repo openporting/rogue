@@ -57,8 +57,18 @@ rogue-kr-port/
    ├─ persist-test.js          ← persist.js IDBFS 흐름 헤드리스 검증(Emscripten FS 목, PASS).
    ├─ more-prompt-test.js      ← 장착/장비(get_item) 프롬프트의 --More-- 교착 회귀 테스트.
    │                              실 bridge.js + endmsg/get_item 재현(wasm 불필요, PASS).
-   └─ e2e-test.js              ← 실제 WASM 엔진을 실 bridge.js로 구동하는 E2E. 장착 프롬프트에
-                                  잘못된 키를 넣어도 멈추지 않고 응답함을 검증(빌드 후 실행).
+   ├─ e2e-test.js              ← 실제 WASM 엔진을 실 bridge.js로 구동하는 E2E. 장착 프롬프트에
+   │                              잘못된 키를 넣어도 멈추지 않고 응답함을 검증(빌드 후 실행).
+   ├─ ux-dom-harness.js        ← UX E2E 공용 하니스. 의존성 0 DOM 셰임(getElementById/이벤트 버블링/
+   │                              classList/innerHTML 파서/querySelectorAll) + 실 bridge.js + 실
+   │                              index.html UI 스크립트 결선 + 실 rogue.js 부팅. 아래 둘이 공유.
+   ├─ ux-walkthrough-test.js   ← UX 친화성 E2E(pass/fail). 실 터치 UI를 실 엔진에 결선해 사용자 세션
+   │                              (부팅 인디케이터·상태바·탭/스와이프/D패드·자동 팝업 프롬프트 키패드·
+   │                              빗나간 탭 차단·인벤토리 바텀시트·종료 확인·소리 토글·접근성)을 검증.
+   └─ ux-scenario-equip-inventory.js ← 장착/소지품/입기/벗기/먹기 흐름을 실 UI로 진행하며 사용자
+                                  행동을 UI 상호작용 단위(탭→UI 반응→엔진 로그)로 출력하는 내레이션
+                                  워크스루. (이 트레이서로 장착/착용/해제 *완료* 프레임이 영어로 남던
+                                  것을 발견 → i18n.c FIX에 보강, 아래 §8 참고.)
 ```
 
 ## 5. 현재 상태 (정확히)
@@ -89,6 +99,10 @@ rogue-kr-port/
   - **입력**: D-패드/탭/스와이프 → `RogueInput.move`; 액션(줍기·계단↓·계단↑·검색·쉬기) →
     각 메서드; 더보기 바텀시트 → `command(q/r/e/w/W/t/T/i/?)` + a–z 키패드 +
     `key()/enter()/escape()/space()`로 엔진 프롬프트 응답.
+  - **시트 내 프롬프트 에코(`#sheet-msg`)**: 시트/스크림이 열리면 메시지 로그가 가려지므로
+    프롬프트 질문("어느 것을 들까?")과 오선택 피드백("…올바른 항목이 아니다")을 시트 상단에
+    최근 2줄로 다시 표시 → 가려진 프롬프트에 답하는 상황 방지(`render()`가 `getMessages()[0..1]`
+    미러링). `ux-walkthrough-test.js`가 회귀로 검증.
   - **상태줄 stats 훅(§9.3) — 해결**: C 훅/리빌드 없이 `RogueBridge.getStats()`가 엔진의
     **영어 상태줄을 버퍼에서 직접 파싱**(Level=던전 깊이, Gold, Hp, Str, Arm, Exp=캐릭터
     레벨, 허기). 상태줄은 의도대로 번역하지 않으므로 안정적. Node 단위검증 PASS.
@@ -193,6 +207,12 @@ node web/headless-test.js      # '>'/'<'/'Q' -> 한글 메시지 PASS
 파일은 `SCOREFILE` 미정의로 비활성이라 영속화 대상 아님.
 
 ## 8. 한글화(i18n) 전략 — 코드로 입증된 난점
+> 보강(장착/착용/해제 완료문): 비-terse 모드에서 엔진이 `addmsg("you are now ")`/`addmsg("you used
+> to be")`를 앞에 붙여 조립하므로(`weapons.c`/`armor.c`), `i18n.c` `FIX`의 bare `"wielding "/"wearing "`
+> 프레임은 terse에서만 걸렸음 → 전체 조립형(`"you are now wielding "/"you are now wearing "/"you used
+> to be wearing "`)을 추가하고, take_off가 앞에 붙이는 팩 글자 `"b) "`를 `frame_fix_apply`에서 제거.
+> 결과: `"+1,+0 단궁을 들었다"/"… 착용했다"/"… 벗었다"`(아이템명+조사 한글). `gcc -DI18N_DEMO` 3케이스 추가.
+
 영어 원본은 메시지를 **조각으로 이어 붙임**: `msg("there is ") … msg(" to pick up")`, `msg("I see ")`. 한국어는 어순이 달라 **단순 치환이 깨짐**. 따라서:
 - 조각 concat 지점들을 **단일 키 포맷 문자열로 합치는 리팩터링**이 필요.
   예: `"there is %s to pick up"` → 키 `PICKUP_HERE` → `"여기 %s이(가) 있다."`

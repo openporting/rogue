@@ -95,6 +95,13 @@
   .grip{ width:38px; height:4px; background:var(--edge2); border-radius:2px; margin:0 auto 14px; }
   .sheet-h{ font-size:12px; letter-spacing:2px; text-transform:uppercase; color:var(--emberDim);
             font-weight:700; margin-bottom:12px; }
+  /* live echo of the newest log line(s) INSIDE the sheet: when the sheet/scrim
+     is up it dims the message log, so the prompt question ("어느 것을 들까?") and
+     any "올바른 항목이 아니다" feedback must be repeated here or the player is
+     answering a prompt they can't read. */
+  .sheet-msg{ font-size:13.5px; color:var(--parch); background:var(--void); border:1px solid var(--edge);
+              border-radius:8px; padding:9px 11px; margin-bottom:14px; line-height:1.45; white-space:pre-line; }
+  .sheet-msg:empty{ display:none; }
   .cmd-grid{ display:grid; grid-template-columns:1fr 1fr 1fr; gap:8px; margin-bottom:16px; }
   .cmd-grid button{ padding:12px 0; background:var(--void); border:1px solid var(--edge2);
                     border-radius:9px; color:var(--parch); font-family:var(--kr); font-size:13.5px; }
@@ -168,8 +175,9 @@
   <div id="sheet" onclick="event.stopPropagation()">
     <div class="grip"></div>
     <div class="sheet-h">추가 명령</div>
+    <div class="sheet-msg" id="sheet-msg"></div>
     <div class="cmd-grid" id="cmds"></div>
-    <div class="sub-h">아이템 선택 / 응답 — 아래 글자로 프롬프트에 답하세요</div>
+    <div class="sub-h">아이템 선택 / 응답 — 모르면 ‘*목록’으로 확인 후 글자로 답하세요</div>
     <div class="letters" id="letters"></div>
   </div>
 </div>
@@ -285,6 +293,13 @@
       '<div class="msg m' + i + '"><span class="tick">▸</span><span></span></div>'
     ).join("");
     log.querySelectorAll(".msg span:last-child").forEach((s, i) => { s.textContent = msgs[i]; });
+
+    // ── echo the newest line(s) inside the command/answer sheet. The open sheet
+    //    dims the log, so without this the player can't read the prompt they're
+    //    answering ("어느 것을 들까?") or why a tap was rejected ("…올바른 항목이
+    //    아니다"). Top 2 keeps the active prompt AND the last feedback visible. ──
+    const sheetMsg = document.getElementById("sheet-msg");
+    if (sheetMsg) sheetMsg.textContent = msgs.slice(0, 2).map((m) => "▸ " + m).join("\n");
 
     // ── overlay sheet (inventory / discoveries / help / options / detection) ──
     renderOverlay(B.getOverlay());

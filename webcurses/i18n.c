@@ -442,6 +442,17 @@ enum { D_NONE, D_MON, D_COLOR, D_IDENT, D_GEAR, D_BOLT };
 static const struct kv BOLT[] = {
     { "bolt", "화살" }, { "flame", "화염" }, { "ice", "얼음" },
 };
+/* trap names (extern.c tr_name[]) — not inv_name items, so a private dict. */
+static const struct kv TRAP[] = {
+    { "a trapdoor",          "함정문" },
+    { "an arrow trap",       "화살 함정" },
+    { "a sleeping gas trap", "수면 가스 함정" },
+    { "a beartrap",          "곰덫" },
+    { "a teleport trap",     "순간이동 함정" },
+    { "a poison dart trap",  "독침 함정" },
+    { "a rust trap",         "부식 함정" },
+    { "a mysterious trap",   "정체불명의 함정" },
+};
 struct frame_fix { const char *pre; const char *post; const char *fmt; int dict; };
 static const struct frame_fix FIX[] = {
     /* items (noun already Korean via the inv_name wrapper) */
@@ -449,8 +460,16 @@ static const struct frame_fix FIX[] = {
     { "you now have ",   "",  "이제 {N을} 가지고 있다",  D_NONE },
     { "you found ",      "",  "{N을} 발견했다",          D_NONE },
     { "moved onto ",     "",  "{N0} 위로 이동했다",      D_NONE },
+    { "you moved onto ", "",  "{N0} 위로 이동했다",      D_NONE },
     { "wielding ",       "",  "{N을} 들었다",            D_NONE },
     { "wearing ",        "",  "{N을} 착용했다",          D_NONE },
+    /* non-terse equip/unequip: the engine prepends "you are now " / "you used
+     * to be" (weapons.c, armor.c), so the bare "wielding "/"wearing " prefixes
+     * above only catch terse mode. Match the full assembled forms too. Take-off
+     * lists a leading pack letter ("b) 사슬…"), stripped in frame_fix_apply. */
+    { "you are now wielding ",   "", "{N을} 들었다",   D_NONE },
+    { "you are now wearing ",    "", "{N을} 착용했다", D_NONE },
+    { "you used to be wearing ", "", "{N을} 벗었다",   D_NONE },
     { "she stole ",      "!", "{N을} 훔쳐 갔다!",        D_NONE },
     /* thrown weapon falls (English weapon name) */
     { "the ",            " vanishes as it hits the ground", "{N가} 땅에 떨어지며 사라진다", D_GEAR },
@@ -461,6 +480,7 @@ static const struct frame_fix FIX[] = {
     /* monsters */
     { "started a wandering ", "",                  "{N가} 배회하기 시작했다",  D_MON },
     { "the ",            " appears confused",       "{N가} 혼란스러워한다",     D_MON },
+    { "you are frozen by the ", "",                "{N0}에게 얼어붙었다",      D_MON },
     /* magic flavor: captured token is a color word */
     { "your hands begin to glow ",  "", "손이 {N0}빛으로 빛나기 시작한다",            D_COLOR },
     { "your hands stop glowing ",   "", "손의 {N0}빛이 사그라든다",                   D_COLOR },
@@ -468,6 +488,7 @@ static const struct frame_fix FIX[] = {
     { "your armor is covered by a shimmering ", " shield", "갑옷이 어른거리는 {N0} 보호막에 둘러싸인다", D_COLOR },
     { "the light in here suddenly seems ", "", "이곳의 빛이 갑자기 {N0} 보인다",       D_COLOR },
     { "a ",              " light flashes in your eyes", "{N0} 빛이 눈앞에서 번쩍인다",  D_COLOR },
+    { "the room is lit by a shimmering ", " light", "방이 일렁이는 {N0}빛으로 밝아진다", D_COLOR },
     /* identify result: captured token is an item-identity name */
     { "this scroll is an ", " scroll", "이 두루마리는 {N0} 두루마리다",  D_IDENT },
     { "this scroll is a ",  " scroll", "이 두루마리는 {N0} 두루마리다",  D_IDENT },
@@ -495,6 +516,10 @@ static int frame_fix_apply(const char *s, char *out)
         size_t nl = strlen(noun);
         if (nl >= 4 && noun[nl - 1] == ')' && noun[nl - 3] == '(' && noun[nl - 4] == ' ')
             noun[nl - 4] = '\0';
+        /* trim a leading pack letter "x) " that take_off lists ("b) 사슬…") */
+        if (((noun[0] >= 'a' && noun[0] <= 'z') || (noun[0] >= 'A' && noun[0] <= 'Z'))
+            && noun[1] == ')' && noun[2] == ' ')
+            memmove(noun, noun + 3, strlen(noun + 3) + 1);
         /* "N gold pieces" -> "금화 N닢" (gold isn't an inv_name item) */
         if (strstr(noun, "gold pieces")) {
             int g = atoi(noun);
@@ -561,6 +586,92 @@ static int frame_food(const char *s, char *out)
     if (starts(s, "my, that was a yummy ")) {
         const char *fruit = s + strlen("my, that was a yummy ");
         sprintf(out, "와, %s%s 맛있었다", fruit, kr_i_ga(fruit));
+        return 1;
+    }
+    return 0;
+}
+
+/* trap discovery: "you found <trap>" / "you have found <trap>" (walk/search '^')
+ * or a bare trap name (hallucinated/identify). Trap names aren't inv_name items,
+ * so they need TRAP[]. Must run before the generic "you found " fix, which would
+ * otherwise leave the English trap name in place. */
+static int frame_trap(const char *s, char *out)
+{
+    const char *rest = NULL;
+    if (starts(s, "you found ")) rest = s + strlen("you found ");
+    else if (starts(s, "you have found ")) rest = s + strlen("you have found ");
+    if (rest) {
+        const char *ko = DICT(TRAP, rest);
+        if (!ko) return 0;                  /* e.g. "5 gold pieces" -> gold fix */
+        out[0] = '\0'; put_eul(out, ko); strcat(out, " 발견했다");
+        return 1;
+    }
+    const char *ko = DICT(TRAP, s);         /* bare trap name */
+    if (ko) { strcpy(out, ko); return 1; }
+    return 0;
+}
+
+/* current(): the ')' weapon, ']' armor and '=' ring status displays.
+ *   "you are wielding b) <item>"               -> "<item> 장착 중"
+ *   "you are wearing b) <armor>"               -> "<armor> 착용 중"
+ *   "you are wearing b) <ring> on left hand"   -> "<ring> 착용 중 (왼손)"
+ *   "you are wielding/wearing nothing[ on X hand]" -> "… 없다" */
+static int frame_current(const char *s, char *out)
+{
+    int wield = starts(s, "you are wielding ");
+    int wear  = starts(s, "you are wearing ");
+    if (!wield && !wear) return 0;
+    const char *rest = s + strlen(wield ? "you are wielding " : "you are wearing ");
+    char body[256];
+    size_t n = strlen(rest); if (n >= sizeof body) n = sizeof body - 1;
+    memcpy(body, rest, n); body[n] = '\0';
+    const char *hand = NULL;
+    if (ends(body, " on left hand"))  { hand = "왼손";  body[strlen(body) - strlen(" on left hand")]  = '\0'; }
+    else if (ends(body, " on right hand")) { hand = "오른손"; body[strlen(body) - strlen(" on right hand")] = '\0'; }
+    if (strcmp(body, "nothing") == 0) {
+        if (hand)       sprintf(out, "%s에 낀 반지가 없다", hand);
+        else if (wield) strcpy(out, "장착한 무기가 없다");
+        else            strcpy(out, "착용한 갑옷이 없다");
+        return 1;
+    }
+    /* strip the leading pack letter: current() formats it "(c) ", but tolerate
+     * a bare "c) " too. */
+    size_t off = 0;
+    if (body[0] == '(' && body[1] && body[2] == ')' && body[3] == ' ') off = 4;
+    else if (((body[0] >= 'a' && body[0] <= 'z') || (body[0] >= 'A' && body[0] <= 'Z'))
+             && body[1] == ')' && body[2] == ' ') off = 3;
+    if (off) memmove(body, body + off, strlen(body + off) + 1);
+    if (hand)       sprintf(out, "%s 착용 중 (%s)", body, hand);
+    else if (wield) sprintf(out, "%s 장착 중", body);
+    else            sprintf(out, "%s 착용 중", body);
+    return 1;
+}
+
+/* re-naming flavor: "Was called \"<old>\"" before the "call it?" prompt. */
+static int frame_called(const char *s, char *out)
+{
+    if (starts(s, "was called \"") && ends(s, "\"")) {
+        const char *a = s + strlen("was called \"");
+        size_t n = strlen(a); if (n) n--;            /* drop the trailing quote */
+        if (n >= 200) n = 200;
+        char name[208]; memcpy(name, a, n); name[n] = '\0';
+        sprintf(out, "이전 이름: \"%s\"", name);
+        return 1;
+    }
+    return 0;
+}
+
+/* medusa: "<mon>'s gaze has confused you" / (mname=="it") "its gaze has …". */
+static int frame_gaze(const char *s, char *out)
+{
+    if (!ends(s, "gaze has confused you")) return 0;
+    if (starts(s, "its gaze has confused you")) { strcpy(out, "그것의 시선에 홀려 혼란에 빠졌다"); return 1; }
+    if (ends(s, "'s gaze has confused you")) {
+        size_t pre = strlen(s) - strlen("'s gaze has confused you");
+        char mon[128]; if (pre >= sizeof mon) pre = sizeof mon - 1;
+        memcpy(mon, s, pre); mon[pre] = '\0';
+        int at, len; const char *ko = find_monster(mon, &at, &len);
+        sprintf(out, "%s의 시선에 홀려 혼란에 빠졌다", ko ? ko : mon);
         return 1;
     }
     return 0;
@@ -675,6 +786,45 @@ static const struct tr_entry TABLE[] = {
     /* pack / inventory */
     { "you aren't carrying anything",               "아무것도 들고 있지 않다" },
     { "nothing here",                               "여기엔 아무것도 없다" },
+    { "there is nothing here to pick up",           "여기엔 주울 것이 없다" },
+    { "no room",                                    "자리가 없다" },
+    { "there's no room in your pack",               "배낭에 빈 자리가 없다" },
+    { "I see no monster there",                     "거기엔 몬스터가 없다" },
+    { "You have found no trap there",               "거기엔 함정이 없다" },
+    { "you are already wearing some.  You'll have to take it off first",
+                                                    "이미 갑옷을 착용하고 있다. 먼저 벗어야 한다" },
+    { "you ran out",                                "다 떨어졌다" },
+    { "That's already in use",                      "이미 사용 중이다" },
+    { "in use",                                     "사용 중" },
+
+    /* wand / scroll / hunger flavor (audit pass) */
+    { "the monster freezes",                        "몬스터가 얼어붙는다" },
+    { "the monsters around you freeze",             "주위의 몬스터들이 얼어붙는다" },
+    { "the flame bounces off the dragon",           "화염이 용에게 튕겨 나간다" },
+    { "the munchies overpower your motor capabilities.  You freak out",
+                                                    "허기로 몸이 말을 듣지 않는다. 환각에 빠진다" },
+    { "you feel too weak from lack of food.  You faint",
+                                                    "굶주려 너무 약해졌다. 정신을 잃는다" },
+    { "You freak out",                              "환각에 빠진다" },
+    { "You faint",                                  "정신을 잃는다" },
+
+    /* rings */
+    { "no rings",                                   "반지 없음" },
+
+    /* prompts (audit pass) */
+    { "left hand or right hand? ",                  "왼손, 오른손? " },
+    { "left or right ring? ",                       "왼쪽, 오른쪽 반지? " },
+    { "what do you want to call it? ",              "무엇이라고 부를까? " },
+    { "call it: ",                                  "이름: " },
+    { "what do you want identified? ",              "무엇을 감정할까? " },
+    { "character you want help for (* for all): ",  "도움말을 볼 문자 (* = 전체): " },
+    { "file name: ",                                "파일 이름: " },
+    { "type of item: ",                             "아이템 종류: " },
+    { "Not a type",                                 "그런 종류가 아니다" },
+    { "for what type of object do you want a list? (* for all)",
+                                                    "어떤 종류의 목록을 볼까? (* = 전체)" },
+    { "what type? (* for all)",                     "어떤 종류? (* = 전체)" },
+    { "Please type one of !?=/ (ESCAPE to quit)",   "!?=/ 중 하나를 입력하세요 (ESCAPE로 취소)" },
     { "you are too weak to use it",                 "너무 약해서 그것을 쓸 수 없다" },
     { "you can't.  it appears to be cursed",        "그럴 수 없다. 저주받은 것 같다" },
     { "you can't.  you're floating off the ground!","그럴 수 없다. 당신은 땅에서 떠 있다!" },
@@ -835,6 +985,10 @@ const char *tr_msg(const char *en)
     if (frame_defeat(key, frame_buf)) return frame_buf;
     if (frame_prompt(key, frame_buf)) return frame_buf;
     if (frame_food(key, frame_buf)) return frame_buf;
+    if (frame_trap(key, frame_buf)) return frame_buf;
+    if (frame_current(key, frame_buf)) return frame_buf;
+    if (frame_called(key, frame_buf)) return frame_buf;
+    if (frame_gaze(key, frame_buf)) return frame_buf;
     if (starts(key, "welcome to level ")) {           /* exp level-up (numeric) */
         sprintf(frame_buf, "레벨 %s에 도달했다", key + 17);
         return frame_buf;
@@ -913,6 +1067,26 @@ int main(void)
         { "you now have 단검 (a)",            "이제 단검을 가지고 있다" },
         { "you found 5 gold pieces",          "금화 5닢을 발견했다" },
         { "moved onto 철퇴",                  "철퇴 위로 이동했다" },
+        { "you moved onto 철퇴",              "철퇴 위로 이동했다" },
+        { "there is nothing here to pick up", "여기엔 주울 것이 없다" },
+        { "there's no room in your pack",     "배낭에 빈 자리가 없다" },
+        { "you are now wielding +1,+0 단궁 (d)",   "+1,+0 단궁을 들었다" },
+        { "you are now wearing +1 사슬 미늘 갑옷 [방어 4]", "+1 사슬 미늘 갑옷 [방어 4]를 착용했다" },
+        { "you used to be wearing b) +1 사슬 미늘 갑옷 [방어 4]", "+1 사슬 미늘 갑옷 [방어 4]를 벗었다" },
+        { "you are wielding (c) +1,+0 단궁",   "+1,+0 단궁 장착 중" },  /* current() uses "(c)" */
+        { "you are wearing (b) +1 사슬 미늘 갑옷 [방어 4]", "+1 사슬 미늘 갑옷 [방어 4] 착용 중" },
+        { "you are wearing (a) 루비 반지 on left hand", "루비 반지 착용 중 (왼손)" },
+        { "you are wielding nothing",         "장착한 무기가 없다" },
+        { "you are wearing nothing on right hand", "오른손에 낀 반지가 없다" },
+        { "you found a trapdoor",             "함정문을 발견했다" },
+        { "You have found a beartrap",        "곰덫을 발견했다" },
+        { "you are frozen by the emu",        "에뮤에게 얼어붙었다" },
+        { "the monsters around you freeze",   "주위의 몬스터들이 얼어붙는다" },
+        { "the room is lit by a shimmering blue light", "방이 일렁이는 파란빛으로 밝아진다" },
+        { "the flame bounces off the dragon", "화염이 용에게 튕겨 나간다" },
+        { "medusa's gaze has confused you",   "메두사의 시선에 홀려 혼란에 빠졌다" },
+        { "That's already in use",            "이미 사용 중이다" },
+        { "what do you want identified? ",    "무엇을 감정할까? " },
         { "started a wandering bat",          "박쥐가 배회하기 시작했다" },
         { "Which object do you want to drop? (* for list): ",
                                               "어느 것을 떨어뜨릴까? (* = 목록): " },
