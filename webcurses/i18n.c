@@ -451,6 +451,13 @@ static const struct frame_fix FIX[] = {
     { "moved onto ",     "",  "{N0} 위로 이동했다",      D_NONE },
     { "wielding ",       "",  "{N을} 들었다",            D_NONE },
     { "wearing ",        "",  "{N을} 착용했다",          D_NONE },
+    /* non-terse equip/unequip: the engine prepends "you are now " / "you used
+     * to be" (weapons.c, armor.c), so the bare "wielding "/"wearing " prefixes
+     * above only catch terse mode. Match the full assembled forms too. Take-off
+     * lists a leading pack letter ("b) 사슬…"), stripped in frame_fix_apply. */
+    { "you are now wielding ",   "", "{N을} 들었다",   D_NONE },
+    { "you are now wearing ",    "", "{N을} 착용했다", D_NONE },
+    { "you used to be wearing ", "", "{N을} 벗었다",   D_NONE },
     { "she stole ",      "!", "{N을} 훔쳐 갔다!",        D_NONE },
     /* thrown weapon falls (English weapon name) */
     { "the ",            " vanishes as it hits the ground", "{N가} 땅에 떨어지며 사라진다", D_GEAR },
@@ -495,6 +502,10 @@ static int frame_fix_apply(const char *s, char *out)
         size_t nl = strlen(noun);
         if (nl >= 4 && noun[nl - 1] == ')' && noun[nl - 3] == '(' && noun[nl - 4] == ' ')
             noun[nl - 4] = '\0';
+        /* trim a leading pack letter "x) " that take_off lists ("b) 사슬…") */
+        if (((noun[0] >= 'a' && noun[0] <= 'z') || (noun[0] >= 'A' && noun[0] <= 'Z'))
+            && noun[1] == ')' && noun[2] == ' ')
+            memmove(noun, noun + 3, strlen(noun + 3) + 1);
         /* "N gold pieces" -> "금화 N닢" (gold isn't an inv_name item) */
         if (strstr(noun, "gold pieces")) {
             int g = atoi(noun);
@@ -913,6 +924,9 @@ int main(void)
         { "you now have 단검 (a)",            "이제 단검을 가지고 있다" },
         { "you found 5 gold pieces",          "금화 5닢을 발견했다" },
         { "moved onto 철퇴",                  "철퇴 위로 이동했다" },
+        { "you are now wielding +1,+0 단궁 (d)",   "+1,+0 단궁을 들었다" },
+        { "you are now wearing +1 사슬 미늘 갑옷 [방어 4]", "+1 사슬 미늘 갑옷 [방어 4]를 착용했다" },
+        { "you used to be wearing b) +1 사슬 미늘 갑옷 [방어 4]", "+1 사슬 미늘 갑옷 [방어 4]를 벗었다" },
         { "started a wandering bat",          "박쥐가 배회하기 시작했다" },
         { "Which object do you want to drop? (* for list): ",
                                               "어느 것을 떨어뜨릴까? (* = 목록): " },

@@ -67,8 +67,8 @@ rogue-kr-port/
    │                              빗나간 탭 차단·인벤토리 바텀시트·종료 확인·소리 토글·접근성)을 검증.
    └─ ux-scenario-equip-inventory.js ← 장착/소지품/입기/벗기/먹기 흐름을 실 UI로 진행하며 사용자
                                   행동을 UI 상호작용 단위(탭→UI 반응→엔진 로그)로 출력하는 내레이션
-                                  워크스루. ⚠ 발견: 장착/착용/해제 *완료* 프레임이 아직 영어
-                                  ("You are now wielding/wearing …", 아이템명만 한글) — i18n 미보강분.
+                                  워크스루. (이 트레이서로 장착/착용/해제 *완료* 프레임이 영어로 남던
+                                  것을 발견 → i18n.c FIX에 보강, 아래 §8 참고.)
 ```
 
 ## 5. 현재 상태 (정확히)
@@ -207,6 +207,12 @@ node web/headless-test.js      # '>'/'<'/'Q' -> 한글 메시지 PASS
 파일은 `SCOREFILE` 미정의로 비활성이라 영속화 대상 아님.
 
 ## 8. 한글화(i18n) 전략 — 코드로 입증된 난점
+> 보강(장착/착용/해제 완료문): 비-terse 모드에서 엔진이 `addmsg("you are now ")`/`addmsg("you used
+> to be")`를 앞에 붙여 조립하므로(`weapons.c`/`armor.c`), `i18n.c` `FIX`의 bare `"wielding "/"wearing "`
+> 프레임은 terse에서만 걸렸음 → 전체 조립형(`"you are now wielding "/"you are now wearing "/"you used
+> to be wearing "`)을 추가하고, take_off가 앞에 붙이는 팩 글자 `"b) "`를 `frame_fix_apply`에서 제거.
+> 결과: `"+1,+0 단궁을 들었다"/"… 착용했다"/"… 벗었다"`(아이템명+조사 한글). `gcc -DI18N_DEMO` 3케이스 추가.
+
 영어 원본은 메시지를 **조각으로 이어 붙임**: `msg("there is ") … msg(" to pick up")`, `msg("I see ")`. 한국어는 어순이 달라 **단순 치환이 깨짐**. 따라서:
 - 조각 concat 지점들을 **단일 키 포맷 문자열로 합치는 리팩터링**이 필요.
   예: `"there is %s to pick up"` → 키 `PICKUP_HERE` → `"여기 %s이(가) 있다."`
