@@ -69,6 +69,14 @@ jobs:
       - name: Verify equip prompt end-to-end (WASM)
         run: node web/e2e-test.js
 
+      # UX-friendliness walkthrough: wires the REAL index.html touch UI to the
+      # REAL bridge.js + rogue.js (on a tiny DOM shim) and walks a full session —
+      # boot affordance, status bar, tap/swipe/D-pad, the auto-popping prompt
+      # keypad, stray-tap blocking, inventory sheet, quit confirm, sound toggle,
+      # a11y — asserting the experience stays friendly on the live engine.
+      - name: Verify touch UI UX walkthrough (WASM)
+        run: node web/ux-walkthrough-test.js
+
       # Assemble the publishable site: runtime files only (drop the Node dev
       # tests, *.o, and the gitignored engine tree). .nojekyll keeps Pages from
       # munging emscripten output.
