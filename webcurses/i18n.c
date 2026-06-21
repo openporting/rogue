@@ -442,6 +442,17 @@ enum { D_NONE, D_MON, D_COLOR, D_IDENT, D_GEAR, D_BOLT };
 static const struct kv BOLT[] = {
     { "bolt", "화살" }, { "flame", "화염" }, { "ice", "얼음" },
 };
+/* trap names (extern.c tr_name[]) — not inv_name items, so a private dict. */
+static const struct kv TRAP[] = {
+    { "a trapdoor",          "함정문" },
+    { "an arrow trap",       "화살 함정" },
+    { "a sleeping gas trap", "수면 가스 함정" },
+    { "a beartrap",          "곰덫" },
+    { "a teleport trap",     "순간이동 함정" },
+    { "a poison dart trap",  "독침 함정" },
+    { "a rust trap",         "부식 함정" },
+    { "a mysterious trap",   "정체불명의 함정" },
+};
 struct frame_fix { const char *pre; const char *post; const char *fmt; int dict; };
 static const struct frame_fix FIX[] = {
     /* items (noun already Korean via the inv_name wrapper) */
@@ -469,6 +480,7 @@ static const struct frame_fix FIX[] = {
     /* monsters */
     { "started a wandering ", "",                  "{N가} 배회하기 시작했다",  D_MON },
     { "the ",            " appears confused",       "{N가} 혼란스러워한다",     D_MON },
+    { "you are frozen by the ", "",                "{N0}에게 얼어붙었다",      D_MON },
     /* magic flavor: captured token is a color word */
     { "your hands begin to glow ",  "", "손이 {N0}빛으로 빛나기 시작한다",            D_COLOR },
     { "your hands stop glowing ",   "", "손의 {N0}빛이 사그라든다",                   D_COLOR },
@@ -573,6 +585,76 @@ static int frame_food(const char *s, char *out)
     if (starts(s, "my, that was a yummy ")) {
         const char *fruit = s + strlen("my, that was a yummy ");
         sprintf(out, "와, %s%s 맛있었다", fruit, kr_i_ga(fruit));
+        return 1;
+    }
+    return 0;
+}
+
+/* trap discovery: "you found <trap>" / "you have found <trap>" (walk/search '^')
+ * or a bare trap name (hallucinated/identify). Trap names aren't inv_name items,
+ * so they need TRAP[]. Must run before the generic "you found " fix, which would
+ * otherwise leave the English trap name in place. */
+static int frame_trap(const char *s, char *out)
+{
+    const char *rest = NULL;
+    if (starts(s, "you found ")) rest = s + strlen("you found ");
+    else if (starts(s, "you have found ")) rest = s + strlen("you have found ");
+    if (rest) {
+        const char *ko = DICT(TRAP, rest);
+        if (!ko) return 0;                  /* e.g. "5 gold pieces" -> gold fix */
+        out[0] = '\0'; put_eul(out, ko); strcat(out, " 발견했다");
+        return 1;
+    }
+    const char *ko = DICT(TRAP, s);         /* bare trap name */
+    if (ko) { strcpy(out, ko); return 1; }
+    return 0;
+}
+
+/* current(): the ')' weapon, ']' armor and '=' ring status displays.
+ *   "you are wielding b) <item>"               -> "<item> 장착 중"
+ *   "you are wearing b) <armor>"               -> "<armor> 착용 중"
+ *   "you are wearing b) <ring> on left hand"   -> "<ring> 착용 중 (왼손)"
+ *   "you are wielding/wearing nothing[ on X hand]" -> "… 없다" */
+static int frame_current(const char *s, char *out)
+{
+    int wield = starts(s, "you are wielding ");
+    int wear  = starts(s, "you are wearing ");
+    if (!wield && !wear) return 0;
+    const char *rest = s + strlen(wield ? "you are wielding " : "you are wearing ");
+    char body[256];
+    size_t n = strlen(rest); if (n >= sizeof body) n = sizeof body - 1;
+    memcpy(body, rest, n); body[n] = '\0';
+    const char *hand = NULL;
+    if (ends(body, " on left hand"))  { hand = "왼손";  body[strlen(body) - strlen(" on left hand")]  = '\0'; }
+    else if (ends(body, " on right hand")) { hand = "오른손"; body[strlen(body) - strlen(" on right hand")] = '\0'; }
+    if (strcmp(body, "nothing") == 0) {
+        if (hand)       sprintf(out, "%s에 낀 반지가 없다", hand);
+        else if (wield) strcpy(out, "장착한 무기가 없다");
+        else            strcpy(out, "착용한 갑옷이 없다");
+        return 1;
+    }
+    /* strip the leading pack letter: current() formats it "(c) ", but tolerate
+     * a bare "c) " too. */
+    size_t off = 0;
+    if (body[0] == '(' && body[1] && body[2] == ')' && body[3] == ' ') off = 4;
+    else if (((body[0] >= 'a' && body[0] <= 'z') || (body[0] >= 'A' && body[0] <= 'Z'))
+             && body[1] == ')' && body[2] == ' ') off = 3;
+    if (off) memmove(body, body + off, strlen(body + off) + 1);
+    if (hand)       sprintf(out, "%s 착용 중 (%s)", body, hand);
+    else if (wield) sprintf(out, "%s 장착 중", body);
+    else            sprintf(out, "%s 착용 중", body);
+    return 1;
+}
+
+/* re-naming flavor: "Was called \"<old>\"" before the "call it?" prompt. */
+static int frame_called(const char *s, char *out)
+{
+    if (starts(s, "was called \"") && ends(s, "\"")) {
+        const char *a = s + strlen("was called \"");
+        size_t n = strlen(a); if (n) n--;            /* drop the trailing quote */
+        if (n >= 200) n = 200;
+        char name[208]; memcpy(name, a, n); name[n] = '\0';
+        sprintf(out, "이전 이름: \"%s\"", name);
         return 1;
     }
     return 0;
@@ -690,6 +772,10 @@ static const struct tr_entry TABLE[] = {
     { "there is nothing here to pick up",           "여기엔 주울 것이 없다" },
     { "no room",                                    "자리가 없다" },
     { "there's no room in your pack",               "배낭에 빈 자리가 없다" },
+    { "I see no monster there",                     "거기엔 몬스터가 없다" },
+    { "You have found no trap there",               "거기엔 함정이 없다" },
+    { "you are already wearing some.  You'll have to take it off first",
+                                                    "이미 갑옷을 착용하고 있다. 먼저 벗어야 한다" },
     { "you are too weak to use it",                 "너무 약해서 그것을 쓸 수 없다" },
     { "you can't.  it appears to be cursed",        "그럴 수 없다. 저주받은 것 같다" },
     { "you can't.  you're floating off the ground!","그럴 수 없다. 당신은 땅에서 떠 있다!" },
@@ -850,6 +936,9 @@ const char *tr_msg(const char *en)
     if (frame_defeat(key, frame_buf)) return frame_buf;
     if (frame_prompt(key, frame_buf)) return frame_buf;
     if (frame_food(key, frame_buf)) return frame_buf;
+    if (frame_trap(key, frame_buf)) return frame_buf;
+    if (frame_current(key, frame_buf)) return frame_buf;
+    if (frame_called(key, frame_buf)) return frame_buf;
     if (starts(key, "welcome to level ")) {           /* exp level-up (numeric) */
         sprintf(frame_buf, "레벨 %s에 도달했다", key + 17);
         return frame_buf;
@@ -934,6 +1023,14 @@ int main(void)
         { "you are now wielding +1,+0 단궁 (d)",   "+1,+0 단궁을 들었다" },
         { "you are now wearing +1 사슬 미늘 갑옷 [방어 4]", "+1 사슬 미늘 갑옷 [방어 4]를 착용했다" },
         { "you used to be wearing b) +1 사슬 미늘 갑옷 [방어 4]", "+1 사슬 미늘 갑옷 [방어 4]를 벗었다" },
+        { "you are wielding (c) +1,+0 단궁",   "+1,+0 단궁 장착 중" },  /* current() uses "(c)" */
+        { "you are wearing (b) +1 사슬 미늘 갑옷 [방어 4]", "+1 사슬 미늘 갑옷 [방어 4] 착용 중" },
+        { "you are wearing (a) 루비 반지 on left hand", "루비 반지 착용 중 (왼손)" },
+        { "you are wielding nothing",         "장착한 무기가 없다" },
+        { "you are wearing nothing on right hand", "오른손에 낀 반지가 없다" },
+        { "you found a trapdoor",             "함정문을 발견했다" },
+        { "You have found a beartrap",        "곰덫을 발견했다" },
+        { "you are frozen by the emu",        "에뮤에게 얼어붙었다" },
         { "started a wandering bat",          "박쥐가 배회하기 시작했다" },
         { "Which object do you want to drop? (* for list): ",
                                               "어느 것을 떨어뜨릴까? (* = 목록): " },
