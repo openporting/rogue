@@ -164,7 +164,7 @@ function createHarness() {
   const log = mk("log", col);
   const controls = mk("controls", col); const dpad = mk("dpad", controls); const actions = mk("actions", controls);
   const scrim = mk("scrim", body); const sheet = mk("sheet", scrim);
-  mk("cmds", sheet); mk("letters", sheet);
+  mk("sheet-msg", sheet); mk("cmds", sheet); mk("letters", sheet);
   const ovlScrim = mk("ovl-scrim", body); const ovlSheet = mk("ovl-sheet", ovlScrim);
   mk("ovl-h", ovlSheet); mk("ovl-body", ovlSheet); mk("ovl-go", ovlSheet);
   // the markup's onclick="event.stopPropagation()" on the sheets.

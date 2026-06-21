@@ -128,6 +128,10 @@ const hasMsg = (re) => messages().some((m) => re.test(m));
     const gotPrompt = await waitFor(() => B.getPrompt() === "item", "wield item prompt");
     check("engine raises an item prompt", gotPrompt);
     check("the answer keypad auto-popped", scrim.classList.contains("open"));
+    // the open sheet dims the log, so the prompt MUST be echoed inside the sheet
+    // or the player is answering a question they can't read.
+    check("the sheet echoes the prompt question (readable while answering)",
+      /목록|들까|것을/.test(byId["sheet-msg"].textContent));
 
     const before = pushed.length, p = B.getPlayer();
     const stray = cellAt(p.x + 1, p.y) || map;
@@ -152,6 +156,9 @@ const hasMsg = (re) => messages().some((m) => re.test(m));
     check("a wrong letter is rejected ('올바른 항목이 아니다')", rejected);
     const reprompt = await waitFor(() => B.getPrompt() === "item", "re-prompt after stray (proves --More-- auto-advanced)");
     check("the prompt is re-issued — engine did NOT freeze on --More--", reprompt);
+    // the rejection feedback must be visible in the sheet too (the log is dimmed).
+    check("the sheet echoes the rejection feedback (so the player sees why)",
+      /올바른 항목이 아니다/.test(byId["sheet-msg"].textContent));
     click(findChild(byId.letters, (b) => b.textContent === "d"));
     const ok = await waitFor(() => B.getPrompt() === null, "prompt clears after a valid letter");
     check("a valid letter still completes after the mistake", ok);

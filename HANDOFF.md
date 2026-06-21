@@ -99,6 +99,10 @@ rogue-kr-port/
   - **입력**: D-패드/탭/스와이프 → `RogueInput.move`; 액션(줍기·계단↓·계단↑·검색·쉬기) →
     각 메서드; 더보기 바텀시트 → `command(q/r/e/w/W/t/T/i/?)` + a–z 키패드 +
     `key()/enter()/escape()/space()`로 엔진 프롬프트 응답.
+  - **시트 내 프롬프트 에코(`#sheet-msg`)**: 시트/스크림이 열리면 메시지 로그가 가려지므로
+    프롬프트 질문("어느 것을 들까?")과 오선택 피드백("…올바른 항목이 아니다")을 시트 상단에
+    최근 2줄로 다시 표시 → 가려진 프롬프트에 답하는 상황 방지(`render()`가 `getMessages()[0..1]`
+    미러링). `ux-walkthrough-test.js`가 회귀로 검증.
   - **상태줄 stats 훅(§9.3) — 해결**: C 훅/리빌드 없이 `RogueBridge.getStats()`가 엔진의
     **영어 상태줄을 버퍼에서 직접 파싱**(Level=던전 깊이, Gold, Hp, Str, Arm, Exp=캐릭터
     레벨, 허기). 상태줄은 의도대로 번역하지 않으므로 안정적. Node 단위검증 PASS.

@@ -55,6 +55,11 @@ async function act(touch, doIt, opts = {}) {
 
   console.log("  " + (++stepNo) + ". [탭] " + touch);
   ui.forEach((u) => console.log("         UI → " + u));
+  // when the sheet is up it dims the log; show what the sheet itself displays so
+  // the trace reflects what the player can actually READ while answering.
+  if (scrimOpen() && byId["sheet-msg"].textContent.trim()) {
+    byId["sheet-msg"].textContent.split("\n").forEach((l) => console.log("         시트 표시 → " + l));
+  }
   news.forEach((m) => console.log("         엔진 → 로그: \"" + m + "\""));
   if (opts.dumpOverlay && ovlOpen()) {
     console.log("         소지품 시트 내용 ┐");
