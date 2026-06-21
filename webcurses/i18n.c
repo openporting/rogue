@@ -488,6 +488,7 @@ static const struct frame_fix FIX[] = {
     { "your armor is covered by a shimmering ", " shield", "갑옷이 어른거리는 {N0} 보호막에 둘러싸인다", D_COLOR },
     { "the light in here suddenly seems ", "", "이곳의 빛이 갑자기 {N0} 보인다",       D_COLOR },
     { "a ",              " light flashes in your eyes", "{N0} 빛이 눈앞에서 번쩍인다",  D_COLOR },
+    { "the room is lit by a shimmering ", " light", "방이 일렁이는 {N0}빛으로 밝아진다", D_COLOR },
     /* identify result: captured token is an item-identity name */
     { "this scroll is an ", " scroll", "이 두루마리는 {N0} 두루마리다",  D_IDENT },
     { "this scroll is a ",  " scroll", "이 두루마리는 {N0} 두루마리다",  D_IDENT },
@@ -660,6 +661,22 @@ static int frame_called(const char *s, char *out)
     return 0;
 }
 
+/* medusa: "<mon>'s gaze has confused you" / (mname=="it") "its gaze has …". */
+static int frame_gaze(const char *s, char *out)
+{
+    if (!ends(s, "gaze has confused you")) return 0;
+    if (starts(s, "its gaze has confused you")) { strcpy(out, "그것의 시선에 홀려 혼란에 빠졌다"); return 1; }
+    if (ends(s, "'s gaze has confused you")) {
+        size_t pre = strlen(s) - strlen("'s gaze has confused you");
+        char mon[128]; if (pre >= sizeof mon) pre = sizeof mon - 1;
+        memcpy(mon, s, pre); mon[pre] = '\0';
+        int at, len; const char *ko = find_monster(mon, &at, &len);
+        sprintf(out, "%s의 시선에 홀려 혼란에 빠졌다", ko ? ko : mon);
+        return 1;
+    }
+    return 0;
+}
+
 /* ---- message table (English -> Korean) ------------------------------------
  * Only fully-assembled, standalone messages live here; fragment-built dynamic
  * lines (item/monster names) are handled in the keyed-template wave and pass
@@ -776,6 +793,38 @@ static const struct tr_entry TABLE[] = {
     { "You have found no trap there",               "거기엔 함정이 없다" },
     { "you are already wearing some.  You'll have to take it off first",
                                                     "이미 갑옷을 착용하고 있다. 먼저 벗어야 한다" },
+    { "you ran out",                                "다 떨어졌다" },
+    { "That's already in use",                      "이미 사용 중이다" },
+    { "in use",                                     "사용 중" },
+
+    /* wand / scroll / hunger flavor (audit pass) */
+    { "the monster freezes",                        "몬스터가 얼어붙는다" },
+    { "the monsters around you freeze",             "주위의 몬스터들이 얼어붙는다" },
+    { "the flame bounces off the dragon",           "화염이 용에게 튕겨 나간다" },
+    { "the munchies overpower your motor capabilities.  You freak out",
+                                                    "허기로 몸이 말을 듣지 않는다. 환각에 빠진다" },
+    { "you feel too weak from lack of food.  You faint",
+                                                    "굶주려 너무 약해졌다. 정신을 잃는다" },
+    { "You freak out",                              "환각에 빠진다" },
+    { "You faint",                                  "정신을 잃는다" },
+
+    /* rings */
+    { "no rings",                                   "반지 없음" },
+
+    /* prompts (audit pass) */
+    { "left hand or right hand? ",                  "왼손, 오른손? " },
+    { "left or right ring? ",                       "왼쪽, 오른쪽 반지? " },
+    { "what do you want to call it? ",              "무엇이라고 부를까? " },
+    { "call it: ",                                  "이름: " },
+    { "what do you want identified? ",              "무엇을 감정할까? " },
+    { "character you want help for (* for all): ",  "도움말을 볼 문자 (* = 전체): " },
+    { "file name: ",                                "파일 이름: " },
+    { "type of item: ",                             "아이템 종류: " },
+    { "Not a type",                                 "그런 종류가 아니다" },
+    { "for what type of object do you want a list? (* for all)",
+                                                    "어떤 종류의 목록을 볼까? (* = 전체)" },
+    { "what type? (* for all)",                     "어떤 종류? (* = 전체)" },
+    { "Please type one of !?=/ (ESCAPE to quit)",   "!?=/ 중 하나를 입력하세요 (ESCAPE로 취소)" },
     { "you are too weak to use it",                 "너무 약해서 그것을 쓸 수 없다" },
     { "you can't.  it appears to be cursed",        "그럴 수 없다. 저주받은 것 같다" },
     { "you can't.  you're floating off the ground!","그럴 수 없다. 당신은 땅에서 떠 있다!" },
@@ -939,6 +988,7 @@ const char *tr_msg(const char *en)
     if (frame_trap(key, frame_buf)) return frame_buf;
     if (frame_current(key, frame_buf)) return frame_buf;
     if (frame_called(key, frame_buf)) return frame_buf;
+    if (frame_gaze(key, frame_buf)) return frame_buf;
     if (starts(key, "welcome to level ")) {           /* exp level-up (numeric) */
         sprintf(frame_buf, "레벨 %s에 도달했다", key + 17);
         return frame_buf;
@@ -1031,6 +1081,12 @@ int main(void)
         { "you found a trapdoor",             "함정문을 발견했다" },
         { "You have found a beartrap",        "곰덫을 발견했다" },
         { "you are frozen by the emu",        "에뮤에게 얼어붙었다" },
+        { "the monsters around you freeze",   "주위의 몬스터들이 얼어붙는다" },
+        { "the room is lit by a shimmering blue light", "방이 일렁이는 파란빛으로 밝아진다" },
+        { "the flame bounces off the dragon", "화염이 용에게 튕겨 나간다" },
+        { "medusa's gaze has confused you",   "메두사의 시선에 홀려 혼란에 빠졌다" },
+        { "That's already in use",            "이미 사용 중이다" },
+        { "what do you want identified? ",    "무엇을 감정할까? " },
         { "started a wandering bat",          "박쥐가 배회하기 시작했다" },
         { "Which object do you want to drop? (* for list): ",
                                               "어느 것을 떨어뜨릴까? (* = 목록): " },
