@@ -43,9 +43,19 @@ const actBtns = () => ovlSheet.querySelectorAll(".inv-acts button");
 const actBtn = (label) => actBtns().find((b) => b.textContent === label);
 const letterOf = (row) => (row.querySelectorAll(".ik")[0].textContent || "").replace(")", "").trim();
 
+/* Open the inventory robustly. A command tapped in the brief window while the
+ * previous turn is still flushing a multi-message `--More--` pause can be eaten
+ * by that pause's `wait_for(' ')` before the bridge's auto-space resolves it —
+ * a real finger is too slow to hit this, but the test taps instantly. So wait
+ * for the engine to go idle, then retry the open if the key was swallowed. */
 async function openInventory() {
-  click(invBtn());
-  await waitFor(ovlOpen, "inventory overlay");
+  for (let attempt = 0; attempt < 5; attempt++) {
+    await waitFor(() => B.getPlayer() !== null && !ovlOpen(), "engine idle before 소지품", 4000);
+    await sleep(120);
+    click(invBtn());
+    if (await waitFor(ovlOpen, "inventory overlay", 2500)) return true;
+  }
+  return false;
 }
 
 (async () => {
@@ -130,9 +140,12 @@ async function openInventory() {
 
   section("7. 던지기 asks for a direction, then auto-feeds the arrow (t→dir→item)");
   {
-    await openInventory();
+    const opened = await openInventory();
+    check("inventory reopened for the throw scenario", opened);
     const arrows = rowByName(/화살/);
     check("the arrows (화살) row is present", !!arrows);
+    if (!arrows) { console.log("FAIL: 화살 행을 찾지 못해 던지기 시나리오를 건너뜁니다"); failures++; }
+    else {
     const arrowLetter = letterOf(arrows);
     click(arrows);
     await sleep(40);
@@ -151,6 +164,7 @@ async function openInventory() {
     check("the chosen arrow letter is auto-fed after the direction", fed);
     check("the throw resolved (prompt cleared, hint hidden)",
       B.getPrompt() === null && !byId["throw-hint"].classList.contains("open"));
+    }
   }
 
   console.log("");
