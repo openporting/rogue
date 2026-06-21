@@ -59,10 +59,16 @@ rogue-kr-port/
    │                              실 bridge.js + endmsg/get_item 재현(wasm 불필요, PASS).
    ├─ e2e-test.js              ← 실제 WASM 엔진을 실 bridge.js로 구동하는 E2E. 장착 프롬프트에
    │                              잘못된 키를 넣어도 멈추지 않고 응답함을 검증(빌드 후 실행).
-   └─ ux-walkthrough-test.js   ← UX 친화성 E2E. 실 index.html 터치 UI를 실 bridge.js+rogue.js에
-                                  경량 DOM 셰임으로 결선해, 실제 사용자 세션(부팅 인디케이터·상태바·
-                                  탭/스와이프/D패드·자동 팝업 프롬프트 키패드·빗나간 탭 차단·인벤토리
-                                  바텀시트·종료 확인·소리 토글·접근성)을 실 엔진으로 워크스루 검증(빌드 후 실행).
+   ├─ ux-dom-harness.js        ← UX E2E 공용 하니스. 의존성 0 DOM 셰임(getElementById/이벤트 버블링/
+   │                              classList/innerHTML 파서/querySelectorAll) + 실 bridge.js + 실
+   │                              index.html UI 스크립트 결선 + 실 rogue.js 부팅. 아래 둘이 공유.
+   ├─ ux-walkthrough-test.js   ← UX 친화성 E2E(pass/fail). 실 터치 UI를 실 엔진에 결선해 사용자 세션
+   │                              (부팅 인디케이터·상태바·탭/스와이프/D패드·자동 팝업 프롬프트 키패드·
+   │                              빗나간 탭 차단·인벤토리 바텀시트·종료 확인·소리 토글·접근성)을 검증.
+   └─ ux-scenario-equip-inventory.js ← 장착/소지품/입기/벗기/먹기 흐름을 실 UI로 진행하며 사용자
+                                  행동을 UI 상호작용 단위(탭→UI 반응→엔진 로그)로 출력하는 내레이션
+                                  워크스루. ⚠ 발견: 장착/착용/해제 *완료* 프레임이 아직 영어
+                                  ("You are now wielding/wearing …", 아이템명만 한글) — i18n 미보강분.
 ```
 
 ## 5. 현재 상태 (정확히)
