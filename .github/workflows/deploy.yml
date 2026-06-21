@@ -77,6 +77,13 @@ jobs:
       - name: Verify touch UI UX walkthrough (WASM)
         run: node web/ux-walkthrough-test.js
 
+      # Contextual inventory: the 🎒 소지품 button on the home screen opens an
+      # interactive inventory whose per-item context menu (먹기/입기/장착/던지기/
+      # 버리기 …) drives the engine end-to-end — incl. the throw direction→item
+      # handshake — through the real UI + bridge + WASM engine.
+      - name: Verify contextual inventory UX (WASM)
+        run: node web/ux-context-inventory-test.js
+
       # Assemble the publishable site: runtime files only (drop the Node dev
       # tests, *.o, and the gitignored engine tree). .nojekyll keeps Pages from
       # munging emscripten output.
