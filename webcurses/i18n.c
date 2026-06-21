@@ -812,6 +812,7 @@ static const struct tr_entry TABLE[] = {
     { "no rings",                                   "반지 없음" },
 
     /* prompts (audit pass) */
+    { "which direction? ",                          "어느 방향으로? " },
     { "left hand or right hand? ",                  "왼손, 오른손? " },
     { "left or right ring? ",                       "왼쪽, 오른쪽 반지? " },
     { "what do you want to call it? ",              "무엇이라고 부를까? " },

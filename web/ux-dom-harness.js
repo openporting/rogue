@@ -167,6 +167,7 @@ function createHarness() {
   mk("sheet-msg", sheet); mk("cmds", sheet); mk("letters", sheet);
   const ovlScrim = mk("ovl-scrim", body); const ovlSheet = mk("ovl-sheet", ovlScrim);
   mk("ovl-h", ovlSheet); mk("ovl-body", ovlSheet); mk("ovl-go", ovlSheet);
+  mk("throw-hint", body);   // 던지기 방향 안내 배너 (index.html과 동일 구성)
   // the markup's onclick="event.stopPropagation()" on the sheets.
   sheet.addEventListener("click", (e) => e.stopPropagation());
   ovlSheet.addEventListener("click", (e) => e.stopPropagation());

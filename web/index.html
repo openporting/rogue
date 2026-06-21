@@ -126,6 +126,33 @@
   .ovl-go{ width:100%; padding:13px 0; background:var(--void); border:1px solid var(--edge2);
            border-radius:10px; color:var(--ember); font-family:var(--kr); font-size:14px; font-weight:600; }
 
+  /* ── interactive inventory: tappable rows + per-item context menu ──
+     The inventory overlay (소지품) is no longer a read-only dump: each item is a
+     button, and tapping it opens a context menu whose actions match the item
+     type (먹기/마시기/입기/장착/던지기/버리기 …). One tap from the home screen
+     (🎒 소지품) instead of 더보기 → 소지품 → 목록 → 닫기 → 키패드. */
+  #ovl-body.list{ white-space:normal; padding:6px 6px; }
+  .inv-row{ display:flex; align-items:center; gap:9px; width:100%; text-align:left;
+            background:var(--floor); border:1px solid var(--edge); border-radius:9px;
+            padding:11px 12px; margin:5px 0; color:var(--parch); font-family:var(--kr); font-size:14px; }
+  .inv-row .ik{ font-family:var(--mono); color:var(--emberDim); font-size:12px; min-width:18px; }
+  .inv-row .inm{ flex:1; line-height:1.35; }
+  .inv-row .itag{ font-size:10.5px; color:var(--parchDim); border:1px solid var(--edge2);
+                  border-radius:5px; padding:1px 7px; white-space:nowrap; }
+  .inv-detail{ padding:2px 2px 0; }
+  .inv-detail .dh{ font-size:14.5px; color:var(--parch); margin:2px 2px 13px; line-height:1.45; }
+  .inv-acts{ display:grid; grid-template-columns:1fr 1fr; gap:8px; }
+  .inv-acts button{ padding:14px 0; background:var(--void); border:1px solid var(--edge2);
+                    border-radius:9px; color:var(--ember); font-family:var(--kr); font-size:14.5px; font-weight:600; }
+  .inv-acts button.danger{ color:var(--blood); }
+  .inv-acts button.back{ color:var(--parchDim); font-weight:500; grid-column:1 / -1; }
+  #throw-hint{ position:fixed; left:50%; transform:translateX(-50%);
+               bottom:calc(118px + env(safe-area-inset-bottom)); z-index:25;
+               background:var(--floor); border:1px solid var(--ember); border-radius:10px;
+               color:var(--ember); font-family:var(--kr); font-size:13.5px; padding:11px 16px;
+               display:none; box-shadow:0 6px 22px #000b; }
+  #throw-hint.open{ display:block; }
+
   @keyframes torch{ 0%,100%{ text-shadow:0 0 6px #e8a04acc,0 0 14px #e8a04a66; }
                     50%{ text-shadow:0 0 4px #e8a04aaa,0 0 10px #e8a04a44; } }
   @keyframes slideup{ from{ transform:translateY(100%); } to{ transform:translateY(0); } }
@@ -194,6 +221,11 @@
   </div>
 </div>
 
+<!-- throw needs a direction first (engine: t → which direction? → which item),
+     so after 던지기 we close the sheet and prompt for a direction here; the
+     chosen item letter is auto-fed once the engine asks. Tap to cancel. -->
+<div id="throw-hint" class="press">🎯 던질 방향을 선택하세요 · 탭하면 취소</div>
+
 <script src="bridge.js"></script>
 <script src="audio.js"></script>
 <script src="persist.js"></script>
@@ -234,6 +266,11 @@
   }
   const bootEl = document.getElementById("boot");
   let lastPromptKind = null;   // rising-edge tracking for the prompt keypad pop
+  // contextual-inventory state: when an item's context-menu action runs a command
+  // (장착/입기/던지기/…), the command raises a get_item prompt — we auto-answer it
+  // with the item the player already chose instead of popping the letter keypad.
+  let pendingItemLetter = null;   // letter to feed the next get_item prompt, or null
+  let awaitingThrowDir = false;   // 던지기 issued; engine wants a direction first
 
   function render() {
     const scr = B.getScreen();
@@ -309,16 +346,33 @@
     //    map tap doesn't get fed to the prompt). Rising-edge: only on the
     //    transition into a prompt, so the player can still close the sheet. ──
     const pk = B.getPrompt();
-    if ((pk === "item" || pk === "yesno") && pk !== lastPromptKind) openSheet();
+    if (pk !== lastPromptKind) {
+      if (pk === "item" && pendingItemLetter) {
+        // a context-menu action's command just raised its get_item prompt — feed
+        // the already-chosen item instead of popping the keypad. (For 던지기 this
+        // fires only AFTER the direction, since the engine asks direction first.)
+        const L = pendingItemLetter; pendingItemLetter = null;
+        awaitingThrowDir = false; showThrowHint(false);
+        I.key(L);
+      } else if (pk === "item" || pk === "yesno") {
+        openSheet();
+      }
+    }
     lastPromptKind = pk;
   }
   B.subscribe(render);
 
-  /* The overlay is whatever Rogue drew to a non-stdscr window. We show its text
-     verbatim; the engine is blocked on a key, so "계속" sends space. */
+  /* The overlay is whatever Rogue drew to a non-stdscr window. Inventory / item
+     lists become interactive (tap an item → context menu); everything else
+     (help / discoveries / death) stays a verbatim read-only dump. The engine is
+     blocked on a key, so the footer button sends space (or ESC for a list). */
   const ovlScrim = document.getElementById("ovl-scrim");
   const ovlBody = document.getElementById("ovl-body");
   const ovlHead = document.getElementById("ovl-h");
+  const ovlGo = document.getElementById("ovl-go");
+  const throwHint = document.getElementById("throw-hint");
+  let ovlMode = "raw";     // "raw" | "menu" (소지품) | "select" (get_item * list)
+
   function overlayTitle(lines) {
     const text = lines.join("\n");
     if (/달리기|화면 다시 그리기|명령 반복/.test(text)) return "도움말";
@@ -326,21 +380,156 @@
     if (/물약|두루마리|반지|지팡이|발견/.test(text) && /\)/.test(text) === false) return "발견 목록";
     return "소지품";
   }
-  function renderOverlay(lines) {
-    if (lines && lines.length) {
-      // drop trailing blank rows and the engine's own prompt line (we have 계속)
-      let body = lines.filter((l) => !/^\s*--.*--\s*$/.test(l));
-      while (body.length && body[body.length - 1].trim() === "") body.pop();
-      ovlHead.textContent = overlayTitle(body);
-      ovlBody.textContent = body.join("\n");
-      ovlScrim.classList.add("open");
-    } else {
-      ovlScrim.classList.remove("open");
+
+  /* ── item classification (from the Korean item name) → a context menu ── */
+  function classifyItem(name) {
+    const worn = /\(착용 중\)/.test(name);      // armor / ring on the body
+    const wielded = /\(장착 중\)/.test(name);    // weapon in hand
+    let type;
+    if (/갑옷/.test(name)) type = "armor";
+    else if (/두루마리/.test(name)) type = "scroll";
+    else if (/물약/.test(name)) type = "potion";
+    else if (/반지/.test(name)) type = "ring";
+    else if (/지팡이|마법봉/.test(name)) type = "wand";   // before 화살: "마법 화살의 지팡이"
+    else if (/화살/.test(name)) type = "ammo";
+    else if (/단궁|장궁|활/.test(name)) type = "bow";
+    else if (/부적/.test(name)) type = "amulet";
+    else if (/음식|식량/.test(name)) type = "food";
+    else type = "weapon";
+    return { type, worn, wielded };
+  }
+  const TYPE_TAG = { armor: "방어구", scroll: "두루마리", potion: "물약", ring: "반지",
+    wand: "지팡이", ammo: "화살", bow: "활", amulet: "부적", food: "음식", weapon: "무기" };
+  const DROP = { label: "버리기", key: "d", needsLetter: true, danger: true };
+  // Rogue command keys (command.c): e eat, q quaff, r read, w wield, W wear,
+  // T take-off (acts on the worn armor directly → no letter), P put-on ring,
+  // R remove-ring, t throw (direction first), z zap wand, d drop.
+  function actionsFor(c) {
+    switch (c.type) {
+      case "food":   return [{ label: "먹기", key: "e", needsLetter: true }, DROP];
+      case "potion": return [{ label: "마시기", key: "q", needsLetter: true }, DROP];
+      case "scroll": return [{ label: "읽기", key: "r", needsLetter: true }, DROP];
+      case "wand":   return [{ label: "사용하기", key: "z", needsLetter: true }, DROP];
+      case "armor":  return c.worn
+        ? [{ label: "벗기", key: "T", needsLetter: false }, DROP]
+        : [{ label: "입기", key: "W", needsLetter: true }, DROP];
+      case "ring":   return c.worn
+        ? [{ label: "빼기", key: "R", needsLetter: false }, DROP]
+        : [{ label: "끼기", key: "P", needsLetter: true }, DROP];
+      case "bow":    return c.wielded
+        ? [{ label: "던지기", key: "t", needsLetter: true }, DROP]
+        : [{ label: "장착", key: "w", needsLetter: true }, { label: "던지기", key: "t", needsLetter: true }, DROP];
+      case "ammo":   return [{ label: "던지기", key: "t", needsLetter: true },
+                             { label: "장착", key: "w", needsLetter: true }, DROP];
+      case "amulet": return [DROP];
+      default:       return c.wielded
+        ? [{ label: "던지기", key: "t", needsLetter: true }, DROP]
+        : [{ label: "장착", key: "w", needsLetter: true }, { label: "던지기", key: "t", needsLetter: true }, DROP];
     }
   }
-  const overlayContinue = () => { buzz(); I.space(); };
-  document.getElementById("ovl-go").addEventListener("click", overlayContinue);
+  function parseInvItems(lines) {
+    const items = [];
+    for (const l of lines) {
+      const m = l.match(/^\s*([a-z])\)\s*(.+?)\s*$/);
+      if (m) items.push({ letter: m[1], name: m[2] });
+    }
+    return items;
+  }
+
+  function showThrowHint(on) { if (throwHint) throwHint.classList.toggle("open", !!on); }
+
+  /* Run a context-menu action: the engine's inventory is blocked on a key, so
+     dismiss it (space) then issue the command. The command's get_item prompt is
+     auto-answered by render() with the item the player already picked. */
+  function performItemAction(it, a) {
+    pendingItemLetter = a.needsLetter ? it.letter : null;
+    awaitingThrowDir = (a.key === "t");
+    I.space();          // close the engine's inventory window
+    I.command(a.key);   // 먹기/입기/장착/던지기/버리기 …
+    if (awaitingThrowDir) showThrowHint(true);   // 던지기: pick a direction next
+    // the overlay clears on the engine's next stdscr refresh.
+  }
+
+  function renderItemDetail(it) {
+    const c = classifyItem(it.name);
+    ovlBody.className = "";
+    ovlBody.textContent = "";
+    ovlHead.textContent = "소지품";
+    const wrap = document.createElement("div"); wrap.className = "inv-detail";
+    const h = document.createElement("div"); h.className = "dh"; h.textContent = it.letter + ") " + it.name;
+    const acts = document.createElement("div"); acts.className = "inv-acts";
+    actionsFor(c).forEach((a) => {
+      const b = document.createElement("button");
+      b.className = "press" + (a.danger ? " danger" : "");
+      b.textContent = a.label;
+      b.addEventListener("click", () => { buzz(); performItemAction(it, a); });
+      acts.appendChild(b);
+    });
+    const back = document.createElement("button");
+    back.className = "press back"; back.textContent = "← 뒤로";
+    back.addEventListener("click", () => { buzz(); renderItemList(parseInvItems(currentBody)); });
+    acts.appendChild(back);
+    wrap.appendChild(h); wrap.appendChild(acts);
+    ovlBody.appendChild(wrap);
+  }
+  function renderItemList(items) {
+    ovlBody.className = "list";
+    ovlBody.textContent = "";
+    if (ovlMode === "select") {
+      ovlHead.textContent = (B.getMessages()[0] || "어느 것을?").replace(/\s*\(\*.*$/, "");
+      ovlGo.textContent = "취소 ▸";
+    } else {
+      ovlHead.textContent = "소지품";
+      ovlGo.textContent = "닫기 ▸";
+    }
+    items.forEach((it) => {
+      const c = classifyItem(it.name);
+      const row = document.createElement("button");
+      row.className = "inv-row press";
+      const k = document.createElement("span"); k.className = "ik"; k.textContent = it.letter + ")";
+      const nm = document.createElement("span"); nm.className = "inm"; nm.textContent = it.name;
+      const tg = document.createElement("span"); tg.className = "itag"; tg.textContent = TYPE_TAG[c.type] || "";
+      row.appendChild(k); row.appendChild(nm); row.appendChild(tg);
+      row.addEventListener("click", () => {
+        buzz();
+        if (ovlMode === "select") I.key(it.letter);   // answer the get_item prompt
+        else renderItemDetail(it);                     // open the context menu
+      });
+      ovlBody.appendChild(row);
+    });
+  }
+  function renderRawOverlay(body) {
+    ovlBody.className = "";
+    ovlHead.textContent = overlayTitle(body);
+    ovlBody.textContent = body.join("\n");
+    ovlGo.textContent = "계속 ▸";
+  }
+
+  let currentBody = [];   // last inventory body (for the 뒤로 button)
+  function renderOverlay(lines) {
+    if (!(lines && lines.length)) { ovlScrim.classList.remove("open"); ovlMode = "raw"; return; }
+    // drop trailing blank rows and the engine's own prompt line (we have a footer)
+    let body = lines.filter((l) => !/^\s*--.*--\s*$/.test(l));
+    while (body.length && body[body.length - 1].trim() === "") body.pop();
+    const items = parseInvItems(body);
+    if (items.length > 0 && overlayTitle(body) === "소지품") {
+      currentBody = body;
+      ovlMode = (B.getPrompt() === "item") ? "select" : "menu";
+      renderItemList(items);
+    } else {
+      ovlMode = "raw";
+      renderRawOverlay(body);
+    }
+    ovlScrim.classList.add("open");
+  }
+  // footer / scrim dismissal: a get_item list cancels (ESC); otherwise space.
+  const overlayContinue = () => { buzz(); ovlMode === "select" ? I.escape() : I.space(); };
+  ovlGo.addEventListener("click", overlayContinue);
   ovlScrim.addEventListener("click", overlayContinue);
+  if (throwHint) throwHint.addEventListener("click", () => {
+    buzz(); pendingItemLetter = null; awaitingThrowDir = false; showThrowHint(false);
+    I.escape();   // cancel the direction prompt
+  });
 
   const A = window.RogueAudio;
   // haptics + first-gesture audio unlock (mobile autoplay policy needs a gesture).
@@ -424,7 +613,7 @@
     ["▾",  "계단↓", () => I.descend()],
     ["▴",  "계단↑", () => I.ascend()],
     ["🔍", "검색", () => I.search()],
-    ["⏳", "쉬기", () => I.rest()],
+    ["🎒", "소지품", () => I.inventory()],   // one tap → interactive inventory (D-pad 중앙 ·이 쉬기)
     ["☰",  "더보기", () => openSheet()],
   ];
   const actEl = document.getElementById("actions");
